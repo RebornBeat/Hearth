@@ -2,7 +2,7 @@
 
 # Hearth
 
-### The Control-Loop Harness — Enforcement Kernel, Control-Factor Substrate & Harness-Independent Benchmark
+### The Control-Loop Harness — Enforcement Kernel, Control-Factor & Context-Traversal Substrate, Harness-Independent Benchmark
 
 **Enforcement over artifacts. Measurement and enforcement are the same control path with different release authority.**
 
@@ -34,22 +34,26 @@
 13. [Harness registration](#13-harness-registration)
 14. [Contracts](#14-contracts)
 15. [The canonical traversal graph](#15-the-canonical-traversal-graph)
-16. [Metrics, for free](#16-metrics-for-free)
-17. [Overhead accounting](#17-overhead-accounting)
-18. [The control-factor space — taxonomy & planes](#18-the-control-factor-space--taxonomy--planes)
-19. [Benchmark: harness power === traversal power](#19-benchmark-harness-power--traversal-power)
-20. [Control economics — cost to correction](#20-control-economics--cost-to-correction)
-21. [Drift — detection, attribution, correction, recurrence](#21-drift--detection-attribution-correction-recurrence)
-22. [The supervisor — the control plane](#22-the-supervisor--the-control-plane)
-23. [The kernel contract — frozen](#23-the-kernel-contract--frozen)
-24. [Quick start](#24-quick-start)
-25. [Design invariants](#25-design-invariants)
-26. [Limitations](#26-limitations)
-27. [Prior art](#27-prior-art)
-28. [Roadmap](#28-roadmap)
-29. [FAQ](#29-faq)
-30. [Glossary](#30-glossary)
-31. [License](#31-license)
+16. [Context traversal & synchronization](#16-context-traversal--synchronization)
+17. [The session — the unit of graph ownership](#17-the-session--the-unit-of-graph-ownership)
+18. [The API surface — four contracts](#18-the-api-surface--four-contracts)
+19. [Metrics, for free](#19-metrics-for-free)
+20. [Overhead accounting](#20-overhead-accounting)
+21. [The control-factor space — taxonomy & planes](#21-the-control-factor-space--taxonomy--planes)
+22. [Benchmark: harness power === traversal power](#22-benchmark-harness-power--traversal-power)
+23. [The canonical baseline & unbiased aggregation](#23-the-canonical-baseline--unbiased-aggregation)
+24. [Control economics — cost to correction](#24-control-economics--cost-to-correction)
+25. [Drift — detection, attribution, correction, recurrence](#25-drift--detection-attribution-correction-recurrence)
+26. [The supervisor — the control plane](#26-the-supervisor--the-control-plane)
+27. [The kernel contract — frozen](#27-the-kernel-contract--frozen)
+28. [Quick start](#28-quick-start)
+29. [Design invariants](#29-design-invariants)
+30. [Limitations](#30-limitations)
+31. [Prior art](#31-prior-art)
+32. [Roadmap](#32-roadmap)
+33. [FAQ](#33-faq)
+34. [Glossary](#34-glossary)
+35. [License](#35-license)
 
 ---
 
@@ -167,7 +171,7 @@ cleanly into any harness, native or meta, as an add-on, a library, or an API.
    than something thrown away after a verdict. The trace is not a log; it is the
    measurement layer ([§15](#15-the-canonical-traversal-graph)) — and it is what makes
    the control-factor space measurable from one instrument
-   ([§18](#18-the-control-factor-space--taxonomy--planes)).
+   ([§21](#21-the-control-factor-space--taxonomy--planes)).
 
 ### Why benchmarking tool and meta harness are one product
 
@@ -204,9 +208,15 @@ HEARTH
 ```
 
 > **Hearth itself is not one control factor. It is the measurement/enforcement substrate
-> for the control-factor space** ([§18](#18-the-control-factor-space--taxonomy--planes)).
+> for the control-factor space** ([§21](#21-the-control-factor-space--taxonomy--planes)).
 
 Loops enforce factors. The taxonomy names what the loops measure. The trace records both.
+
+And the closing formulation — the one to protect most aggressively as this is built:
+
+> **Hearth is a control-observation layer that can reconstruct enough of a session's
+> context graph to measure — and, where authorized, intervene in — the harness's control
+> decisions, without becoming the harness itself.**
 
 ---
 
@@ -250,7 +260,7 @@ R is not a constant. It is a rule:
 |---|---|
 | Normal progress | 3 |
 | High blast radius | 7 |
-| Architectural change | full dependency chain |
+| Architectural change | full dependency chain *(graph-extended — [§16](#16-context-traversal--synchronization))* |
 | Contract version change | full dependency chain |
 | Critical failure | replay from last stable checkpoint |
 
@@ -323,8 +333,17 @@ No host capability is silently required; what is missing is declared.
 │  └───────────────────────────────────────────┘    │
 │                                                   │
 │  ┌───────────────────────────────────────────┐    │
+│  │ TRAVERSAL LAYER                           │    │
+│  │ · pluggable strategies over session graphs│    │
+│  │ · default.temporal / default.dependency / │    │
+│  │   default.blast_radius / default.hybrid   │    │
+│  │ · harness-registered strategies           │    │
+│  └───────────────────────────────────────────┘    │
+│                                                   │
+│  ┌───────────────────────────────────────────┐    │
 │  │ STATE STORE  (storage-agnostic)           │    │
 │  │ · goals · subtasks · checklists · recaps  │    │
+│  │ · session graphs — one per session        │    │
 │  └───────────────────────────────────────────┘    │
 │                                                   │
 │  ┌───────────────────────────────────────────┐    │
@@ -333,8 +352,12 @@ No host capability is silently required; what is missing is declared.
 └───────────────────────────────────────────────────┘
 ```
 
-The state store holds the artifacts. The registry holds the loops. The core binds them.
-The trace falls out.
+The state store holds the artifacts and the session graphs. The registry holds the loops.
+The traversal layer navigates. The core binds them. The trace falls out.
+
+> **The store is not the product.** The store is the persistent substrate for a live,
+> adaptable context-traversal and control system
+> ([§16](#16-context-traversal--synchronization)).
 
 ---
 
@@ -345,8 +368,8 @@ state change is one **tick** — the atomic unit of enforcement, measurement, an
 There is no coarser or finer unit.
 
 This makes "iteration" exact: **an iteration is one tick.** Every replay, every
-verification, every trace record happens at tick boundaries. AITD is ticks per level —
-the metric and the mechanism share a unit.
+verification, every traversal, every trace record happens at tick boundaries. AITD is
+ticks per level — the metric and the mechanism share a unit.
 
 ### Event identity vs iteration identity — stated precisely
 
@@ -366,26 +389,33 @@ allowed to blur the count.
 
 ### The per-tick pipeline
 
-Fixed for every tick, native or meta, regardless of how many loops are loaded:
+Fixed for every tick, native or meta, regardless of how many loops or strategies are
+loaded:
 
 ```
 TICK
  1. INTERCEPT   host emits event (prompt / tool call / state change)
  2. RESOLVE     registry resolves which loops fire this tick
                 (scope match + trigger match + composes_with check)
- 3. STEP        each resolved loop steps — cheap checks first,
-                deep replay only on trigger
- 4. AGGREGATE   one verdict per tick — worst verdict wins:
+ 3. TRAVERSE    context resolution — relevant prior state + impact subgraph
+                (via the Traversal API; strategy pluggable, result canonical)
+ 4. STEP        each resolved loop steps against the synced context —
+                cheap checks first, deep replay only on trigger
+ 5. AGGREGATE   one verdict per tick — worst verdict wins:
                 HALT > BACKTRACK(dmax) > REPAIR > CONTINUE
- 5. EMIT        one trace record per loop + one tick record
- 6. RELEASE     CONTINUE releases the tick to the host;
+ 6. SYNC        backward sync confirmed; forward sync of consequences —
+                mandatory before release on REPAIR / BACKTRACK
+ 7. EMIT        one trace record per loop + one tick record
+                (including the traversal record itself)
+ 8. RELEASE     CONTINUE releases the tick to the host;
                 anything else holds, per verdict
 ```
 
-The pipeline never changes when loops are added. A new loop adds checks to step 3 —
-never ticks, never stages. **Addition is monotonic.** Flash in a modality loop, a tool
-gate, a scenario policy: same ticks, same rhythm, more eyes per tick. This is why
-addition never destabilizes the host.
+The pipeline never changes when loops or strategies are added. A new loop adds checks to
+step 4; a new strategy adds traversal behavior inside step 3 — never ticks, never
+steps. **Addition is monotonic.** Flash in a modality loop, a tool gate, a scenario
+policy, a custom traversal strategy: same ticks, same rhythm, more eyes and better
+navigation per tick. This is why addition never destabilizes the host.
 
 ### The non-rewrite guarantee
 
@@ -490,7 +520,7 @@ When two loops return `BACKTRACK` with **different depths**, the aggregation rul
 > the gate.)
 
 This is an invariant, not a convention
-([Invariant #12](#25-design-invariants)).
+([Invariant #12](#29-design-invariants)).
 
 ### What a run looks like — and why the depth data falls out
 
@@ -550,7 +580,7 @@ pipeline** ([§6](#6-the-tick--the-atomic-unit)) with different release authorit
 
 | Posture | Pipeline timing | Release behavior | Asks |
 |---|---|---|---|
-| **OBSERVE** | synchronous, step 3 bypassed | trace only | *what happened?* |
+| **OBSERVE** | synchronous, steps 3–4 bypassed | trace only | *what happened?* |
 | **AUDIT / SHADOW** | asynchronous (shadow) | records findings; host continues | *what did the harness do wrong when nothing stopped it?* |
 | **AUDIT / ACTIVE** | asynchronous (shadow) | records findings **and** files actionable findings the supervisor or outer loop can act on between ticks | *what went wrong, and what should be done about it?* |
 | **ENFORCE / AUTO** | synchronous | gates on policy, automatically | *how does the harness perform when invalid progression is prevented?* |
@@ -584,7 +614,7 @@ Enforced audit asks a different question:
 
 That quantifies controlled capability. Run both and the difference between them is
 itself a benchmark — the **Hearth Delta**
-([§19](#19-benchmark-harness-power--traversal-power)).
+([§22](#22-benchmark-harness-power--traversal-power)).
 
 ### The legacy ladder — mapped, not replaced
 
@@ -788,7 +818,7 @@ same enforcement core, same trace format. The stack grows without degrading — 
 is monotonic, never a new cadence.
 
 **Loops enforce factors.** Each loop is the executable embodiment of one or more control
-factors ([§18](#18-the-control-factor-space--taxonomy--planes)) — `tool.gate` enforces
+factors ([§21](#21-the-control-factor-space--taxonomy--planes)) — `tool.gate` enforces
 the *irreversibility* factor, `verification.replay` enforces the *replay* factor. The
 taxonomy names what the loops measure; the loops are how factors get teeth.
 
@@ -797,7 +827,9 @@ taxonomy names what the loops measure; the loops are how factors get teeth.
 ## 12. The registries
 
 The vest is a **routing table**, not a costume. Loops are addressable by **scope key**
-and resolve at tick time.
+and resolve at tick time. Traversal strategies are registered the same way — defaults
+plus harness-registered, keyed by scope
+([§18](#18-the-api-surface--four-contracts)).
 
 ### Structure
 
@@ -808,6 +840,7 @@ REGISTRY
 ├── modality registry    loops keyed by modality scope     (first-class)
 ├── tool registry        loops keyed by tool scope
 ├── scenario registry    loops keyed by task/scenario scope
+├── traversal registry   strategies keyed by scope — defaults + harness-registered
 └── bundle registry      named sets of loops — kits
 ```
 
@@ -825,7 +858,9 @@ A loop fires on a tick iff **all** hold:
 3. **Composition holds** — the loop's `composes_with` permits the active set
 
 Firing order is deterministic: declared priority, then registration order.
-No nondeterministic stacks.
+No nondeterministic stacks. The same determinism governs strategy selection in step 3
+of the pipeline: scope-declared strategy first, then the default
+([§13](#13-harness-registration)).
 
 ### Bundles — kits
 
@@ -863,7 +898,8 @@ chain, all resolved at tick time. No unbound contract, now at the routing layer 
 ## 13. Harness registration
 
 Register harnesses around Hearth, and harnesses into Hearth, from config — including
-the capability declaration that makes every comparison honest:
+the capability declaration that makes every comparison honest, and the traversal
+strategy that shapes how context is navigated:
 
 ```yaml
 # hearth.config.yaml
@@ -884,6 +920,12 @@ harness:
       snapshot: true
       compensate: false
       supervise: true
+
+traversal:
+  default: default.hybrid       # the canonical baseline strategy
+  overrides:
+    - scope: harness:my-agent-harness
+      strategy: harness-x.context.graph
 
 loops:
   - id: modality.vision
@@ -914,7 +956,8 @@ attach:
 Every harness is unique. The adapter exists precisely to honor that: it preserves each
 harness's native control surface and maps it onto the one module contract. Nothing about
 your harness needs to change to be controlled — and nothing about Hearth changes to
-control it.
+control it. The same holds for traversal: your harness's own navigation strategy is
+registered, not replaced.
 
 ---
 
@@ -996,6 +1039,11 @@ something no file tree can express — and why traversal depth (graph path lengt
 including revisits) and serialization level (registry nesting) are reported as separate
 quantities ([§8](#8-stacking--precedence--levels-locked)).
 
+**And one substrate, read two ways.** The same graph also supports **context traversal**
+— the dependency/relationship reading, distinct from the temporal reading. Both are
+first-class, and [§16](#16-context-traversal--synchronization) is dedicated to the
+second.
+
 ### Example event
 
 ```json
@@ -1034,15 +1082,520 @@ The benchmark measures agent traversal capacity, not the peculiarities of any on
 data model.
 
 **The trace is a substrate, not a log.** Enforcement history feeds checkpoints, replay,
-drift attribution ([§21](#21-drift--detection-attribution-correction-recurrence)),
-benchmarks ([§19](#19-benchmark-harness-power--traversal-power)), the supervisor's view
-([§22](#22-the-supervisor--the-control-plane)), and the control-factor space
-([§18](#18-the-control-factor-space--taxonomy--planes)). The verdict consumes the tick;
+context traversal ([§16](#16-context-traversal--synchronization)), drift attribution
+([§25](#25-drift--detection-attribution-correction-recurrence)), benchmarks
+([§22](#22-benchmark-harness-power--traversal-power)), the supervisor's view
+([§26](#26-the-supervisor--the-control-plane)), and the control-factor space
+([§21](#21-the-control-factor-space--taxonomy--planes)). The verdict consumes the tick;
 the graph keeps everything.
 
 ---
 
-## 16. Metrics, for free
+## 16. Context traversal & synchronization
+
+> **The store is not the product.** The store is the persistent substrate for a live,
+> adaptable context-traversal and control system.
+
+Hearth does not need to reconstruct or own the entire context at every tick. It needs to
+maintain enough **state + relationships + checkpoints + traversal history** to determine
+two things at every tick:
+
+1. **What is relevant** to the current tick, and
+2. **What prior state must be synchronized** before forward progression is allowed.
+
+Not full context management — **relevance discovery plus synchronization**. Which
+checkpoints matter. Where the blast area is. Which points have a relationship with the
+current one, or are affected by it.
+
+### The per-tick context flow
+
+```
+                    CURRENT TICK
+                         │
+                         ▼
+                  ┌─────────────┐
+                  │ CONTEXT     │
+                  │ RESOLUTION  │
+                  └──────┬──────┘
+                         │
+             find relevant prior state
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ IMPACT / BLAST AREA │
+              │ dependency graph    │
+              └──────────┬──────────┘
+                         │
+                    BACKWARD SYNC
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ CHECKPOINT STATE    │
+              │ + contracts         │
+              │ + prior decisions   │
+              │ + dependencies      │
+              └──────────┬──────────┘
+                         │
+                       VERIFY
+                         │
+                         ▼
+                    CURRENT STATE
+                         │
+                  FORWARD SYNC
+                         │
+                         ▼
+                  RELEASE TICK
+```
+
+Every tick: **look back, sync with the past, confirm, sync forward.** Backward
+synchronization is confirmed before release; forward synchronization propagates the
+consequences of anything that changed. Neither is optional on a non-CONTINUE verdict —
+a tick only advances once it is synchronized with its own past. The loop is not simply
+"look back R ticks"; it is increasingly:
+
+```
+look back to the relevant state
+        ↓
+synchronize dependencies
+        ↓
+verify
+        ↓
+propagate consequences forward
+        ↓
+continue
+```
+
+### Two traversals — temporal and contextual
+
+The canonical graph ([§15](#15-the-canonical-traversal-graph)) is **one substrate, read
+two ways**:
+
+**Temporal traversal** — the execution timeline:
+
+```
+T1 → T2 → T3 → T4 → T5 → T6
+```
+
+**Context traversal** — the dependency/relationship space:
+
+```
+             T6
+            /  \
+          A     B
+          │     │
+          C─────D
+           \
+            E
+```
+
+At T6, you do not necessarily need to replay T1–T5. You need to discover **which prior
+state has causal or contractual relevance to T6**:
+
+```
+T2 → A → C → T6
+```
+
+while the rest of the historical context is irrelevant to this tick. That is why the
+graph representation matters — and why "look back R ticks" is the *default*, not the
+definition:
+
+> **R remains the bounded default. Graph traversal identifies where that bounded window
+> needs to extend** — along relationship edges, not just tick count. "Replay the full
+> dependency chain" in the dynamic-R table ([§4](#4-the-core-loop)) is not a bigger
+> number; it is a different traversal.
+
+### The impact subgraph — blast radius, made concrete
+
+Blast radius is not "go back seven iterations." It is computed:
+
+```
+CURRENT FINDING
+      │
+      ▼
+affected entity
+      │
+      ├── depends_on
+      ├── referenced_by
+      ├── derived_from
+      ├── modified_by
+      └── contract_dependency
+              │
+              ▼
+        IMPACT SUBGRAPH
+```
+
+> **blast_radius = the reachable affected state, under the applicable relationship
+> semantics.**
+
+And — the critical architectural separation — **the traversal algorithm determines how
+that subgraph is discovered.** The kernel defines the contract; strategies compete
+inside it ([§18](#18-the-api-surface--four-contracts)). The result is always canonical;
+the navigation never is.
+
+---
+
+## 17. The session — the unit of graph ownership
+
+There is no global universal context in Hearth — by design. A universal context would
+impose Hearth's ontology on every harness, and Hearth's job is the opposite:
+
+> **Each harness, each session, is unique — and each session builds its own map.
+> Hearth enforces control semantics *around* that map. It does not enforce or restrict
+> the map's design. It shapes around it.**
+
+### The structure
+
+```
+RUN
+ │
+ └── SESSION
+      │
+      ├── native harness state
+      ├── contracts
+      ├── checkpoints
+      ├── traversal graph
+      ├── control loops
+      ├── findings
+      ├── impact regions
+      └── trace
+```
+
+Every session builds its own graph. Two sessions can have completely different shapes:
+
+```
+SESSION A                       SESSION B
+
+Goal                            Goal
+ ├── code                        ├── scene
+ │    ├── file                   │    ├── collection
+ │    └── test                   │    │    └── object
+ └── deployment                  │    └── material
+      └── environment            └── render
+```
+
+Hearth doesn't care. **The graph is simply the session's world model.**
+
+### The session record
+
+```
+SESSION
+ ├── ticks        state · checkpoint · observations · controls
+ ├── traversal    nodes visited · edges followed · backtracks · forward syncs · strategy
+ ├── impact       affected nodes · dependencies · blast/impact subgraphs
+ ├── verification comparisons · mismatches · corrections · verification cost
+ └── release      final state · verdict · confidence/evidence
+```
+
+Provenance + state + topology — enough to reconstruct **why a harness arrived at a
+particular verdict**, without forcing every harness to take the same path.
+
+### Never collapsed
+
+> **The canonical store does not collapse a session into a single "final answer."**
+
+It preserves the whole chain:
+
+```
+what existed
+      ↓
+what was traversed
+      ↓
+what was inspected
+      ↓
+what was skipped          ← the negative space — measurable missed context
+      ↓
+what was discovered later
+      ↓
+what had to be corrected
+      ↓
+what that correction affected
+      ↓
+what was ultimately released
+```
+
+That chain is precisely what allows Hearth to measure **drift, correction, traversal
+efficiency, verification cost, missed context, and control effectiveness** — the
+skipped and the late-discovered are as load-bearing as the verified.
+
+### Per-session traces against the same substrate
+
+```
+                    CANONICAL STORE
+                          │
+             ┌────────────┼────────────┐
+             │            │            │
+          Harness A    Harness B    Harness C
+             │            │            │
+          Session 1    Session 1    Session 1
+             │            │            │
+          Session 2    Session 2    Session 2
+```
+
+Each session develops its own observed control/traversal trace against the canonical
+substrate. Same data, same checkpoints, same context, same impact relationships —
+different control behavior:
+
+```
+Harness A → correction = X
+Harness B → correction = Y
+Harness C → correction = Z
+```
+
+Which upgrades the benchmark question from *"Model A scored 91%, Model B scored 87%"*
+to:
+
+> **Given the same contextual state and the same control problem, how did different
+> control strategies traverse, synchronize, verify, correct, and release?**
+
+---
+
+## 18. The API surface — four contracts
+
+This is the point where Hearth connects to harnesses at the **context and store level**
+— the boundary that determines whether Hearth remains a flexible benchmark/control
+substrate or accidentally becomes a prescriptive execution framework. It is therefore
+specified as four separable contracts:
+
+```
+                    HEARTH
+                       │
+        ┌──────────────┴──────────────┐
+        │                             │
+   CONTROL API                    TRACE API
+        │                             │
+ loops / rules /                  canonical events
+ verdicts / gates                 checkpoints / states
+        │                             │
+        └──────────────┬──────────────┘
+                       │
+                 TRAVERSAL API
+                       │
+          ┌────────────┼────────────┐
+          │            │            │
+       Default      Harness A    Harness B
+       Traverser    Traverser    Traverser
+          │            │            │
+          └────────────┼────────────┘
+                       │
+                  CONTEXT API
+                       │
+             backward / forward
+             relationship / impact
+             checkpoint sync
+                       │
+                  VERIFICATION
+                       │
+                    VERDICT
+                       │
+                    RELEASE
+```
+
+### The TraversalStrategy contract
+
+The kernel defines the **contract for traversal, not the algorithm**:
+
+```python
+class TraversalStrategy(Protocol):
+    id: str
+    version: str
+    capabilities: set[str]
+    applicable_scopes: set[str]
+
+    def resolve_context(self, tick) -> ContextResult: ...
+    def find_dependencies(self, entity) -> Subgraph: ...
+    def find_impact(self, finding) -> Subgraph: ...
+    def select_checkpoints(self, context) -> list[Checkpoint]: ...
+    def traverse(self, graph, query) -> TraversalRecord: ...
+    def estimate_cost(self, plan) -> CostEstimate: ...
+```
+
+Hearth ships defaults:
+
+```
+default.temporal · default.dependency · default.blast_radius · default.hybrid
+```
+
+and any harness can register its own:
+
+```
+harness-x.context.graph
+harness-x.context.semantic
+harness-x.context.domain-specific
+```
+
+**The result contract stays canonical.** Harness A runs its algorithm; Harness B runs a
+completely different one; both produce canonical context results into the same Hearth.
+
+### The traversal primitives
+
+The Traversal API doesn't need to know *why* a harness wants to traverse something. It
+exposes capabilities; the harness composes them into its own strategy:
+
+```
+get_checkpoint()        get_neighbors()         get_dependencies()
+get_dependents()        get_impact_area()       traverse_backward()
+traverse_forward()      sync_to_checkpoint()    verify_state()
+record_traversal()
+```
+
+### The ownership split — frozen
+
+```
+HEARTH owns:
+    What happened · what was controlled · what was verified
+    what checkpoints exist · what relationships/impacts exist
+    what was released · what can be reconstructed
+
+HARNESS owns:
+    How it traverses · what it considers relevant
+    how it searches the graph · how aggressively it backtracks
+    which checkpoints it synchronizes · which control loops it applies
+    how it optimizes its own execution
+```
+
+### What the store says — and what it must never say
+
+The canonical trace is an **evidence substrate**. It is capable of saying:
+
+> *"At tick T, these states/checkpoints existed, these relationships were traversable,
+> these impacts were observed, these controls were applied, these verifications
+> occurred, and this was the resulting state."*
+
+It must **never** collapse into:
+
+> *"Harness A traversed the context this way."*
+
+Because against the same evidence, Harness A can do:
+
+```
+T7 → backtrack → T5 → impact subgraph → verify T5→T7 → release
+```
+
+while Harness B does:
+
+```
+T7 → relationship expansion → T3, T4, T6 → selective verification → forward sync → release
+```
+
+**Both operated against the same canonical substrate.** That is what makes the
+benchmarking possible — and it is why you are not benchmarking whether everyone uses
+*your* traversal algorithm:
+
+> **You're benchmarking what happens when each harness's control system operates over
+> its own context model — while Hearth captures the resulting control behavior in a
+> common representation.**
+
+### Three adaptation layers
+
+"Adaptable" in Hearth is three distinct adaptations, not one:
+
+| Layer | What adapts | Direction |
+|---|---|---|
+| **Host adaptation** | Codex, Claude, ChatGPT, custom harness, Blender, CAD → canonical events | host → Hearth |
+| **Context adaptation** | harness's native state model → session graph | host → Hearth |
+| **Traversal adaptation** | session graph → harness/domain-specific strategy → relevant context, impact, checkpoints | Hearth → host |
+
+Host and context adaptation flow *into* Hearth. Traversal adaptation flows *out* —
+Hearth provides the substrate; the harness provides the navigation. The enforcement
+kernel stays stable across all three:
+
+```
+EVENT → RESOLVE → TRAVERSE → VERIFY → VERDICT → SYNC/REPAIR/BACKTRACK → TRACE → RELEASE
+```
+
+### Why the boundary must stay loose
+
+If Hearth dictated the internal architecture of every harness, you would accidentally
+benchmark **compliance with Hearth's architecture**. Instead, Hearth benchmarks:
+
+> **the control behavior that emerges from each architecture.**
+
+That is why the freeze discipline cuts one way only:
+
+> **Freeze the canonical model. Never freeze the traversal implementations.**
+
+### The full architecture
+
+```
+                         HEARTH
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+       CONTROL KERNEL              CANONICAL TRACE
+             │                           │
+      ┌──────┼──────┐                    │
+      │      │      │                    │
+   loops  verdicts checkpoints       session graph
+      │      │      │                    │
+      └──────┼──────┘                    │
+             │                           │
+             └──────────┬────────────────┘
+                        │
+                  TRAVERSAL API
+                        │
+          ┌─────────────┼─────────────┐
+          │             │             │
+       default       harness-A     harness-B
+       strategy      strategy      strategy
+          │             │             │
+          └─────────────┼─────────────┘
+                        │
+                   CONTEXT SYNC
+                        │
+                  backward + forward
+                        │
+                  IMPACT SUBGRAPH
+                        │
+                     VERIFY
+                        │
+                    VERDICT
+                        │
+                     RELEASE
+```
+
+The store gives you persistence. The graph gives you context. The traversal strategy
+gives you adaptability. The checkpoints give you temporal synchronization. The control
+loops give you enforcement. The canonical trace gives you measurement. The session
+boundary preserves each harness's uniqueness. The externality gives you cross-harness
+and cross-model comparison.
+
+### What falls out — nothing bolted on
+
+None of the following are features that had to be added. They emerge from the
+substrate:
+
+```
+control loops · context traversal · backward synchronization · forward synchronization
+impact/blast areas · missed context · drift · correction · correction cost
+verification efficiency · checkpoint effectiveness · harness behavior
+model comparison · strategy comparison · session-specific behavior
+replay / back-simulation · benchmarking
+```
+
+Hearth doesn't have to know beforehand what every future harness will need. It stores
+the **relationships, states, events, checkpoints, decisions, traversal, and
+verification evidence** from which those measurements derive — so a future harness with
+a completely different strategy (breadth-first impact, depth-first dependency,
+selective checkpoint, learned/adaptive) requires no redesign. It implements against the
+same traversal/context contracts and produces its own session trace.
+
+That is also why the architecture can stay **clean while becoming multidimensional**.
+You are not encoding every dimension into the control kernel. You are separating:
+
+```
+WHAT EXISTS → WHAT HAPPENED → WHAT WAS RELATED → WHAT WAS TRAVERSED
+→ WHAT WAS VERIFIED → WHAT WAS CORRECTED → WHAT WAS RELEASED
+```
+
+from:
+
+```
+HOW A PARTICULAR HARNESS CHOOSES TO NAVIGATE THAT WORLD
+```
+
+---
+
+## 19. Metrics, for free
 
 The enforcement core is also the instrument. Every verdict, every iteration, emits a
 record. Nothing extra to wire — **the thing that enforces traversal is the same thing
@@ -1072,9 +1625,9 @@ AITD is reported as **distributions per level (p50 / p95), not just means** — 
 that alternates between shallow and deep traversal is different from one that sits at
 the average, and the mean hides that.
 
-### The depth family — eight depths, one vector, never collapsed
+### The depth family — nine depths, one vector, never collapsed
 
-Hearth distinguishes eight depths, and refuses to collapse them into one number:
+Hearth distinguishes nine depths, and refuses to collapse them into one number:
 
 | Depth | Meaning |
 |---|---|
@@ -1084,6 +1637,7 @@ Hearth distinguishes eight depths, and refuses to collapse them into one number:
 | **Correction depth** | how far backward a correction propagated |
 | **Backtrack depth** | checkpoints returned in a backtrack |
 | **Dependency depth** | how deep the affected dependency chain reached |
+| **Context depth** | depth in the relationship graph at which relevant prior state was found — discovered by traversal, not tick count |
 | **Synchronization depth** | how far back state was re-synced before advancing |
 | **Verification depth** | how deeply verification examined |
 
@@ -1097,6 +1651,7 @@ Reported per run as the **depth vector**:
   "correction": [2, 5],
   "backtrack": [2],
   "dependency": 9,
+  "context": [2, 4],
   "synchronization": [4],
   "verification": [3, 3, 7]
 }
@@ -1105,8 +1660,8 @@ Reported per run as the **depth vector**:
 The shape of the vector *is* the harness's control character: a harness that verifies
 shallowly but synchronizes deeply is a different machine from one that does the reverse,
 and no single number can express that difference
-([Invariant #17](#25-design-invariants)). The economics of each depth behavior is priced
-separately in [§20](#20-control-economics--cost-to-correction).
+([Invariant #17](#29-design-invariants)). The economics of each depth behavior is priced
+separately in [§24](#24-control-economics--cost-to-correction).
 
 ### Also emitted, per depth
 
@@ -1135,6 +1690,25 @@ Harness C   12    41    63    27      143
 
 That is a concrete, structured, judge-free measurement of control-loop traversal
 capacity — and it falls out of normal operation.
+
+### The context family — traversal, skipping, and synchronization
+
+Context traversal ([§16](#16-context-traversal--synchronization)) adds its own
+measurement set:
+
+| Metric | Meaning |
+|---|---|
+| `missed_context` | context that should have been traversed but wasn't — the negative space of the traversal record; a **lower bound**, reported honestly as such ([§17](#17-the-session--the-unit-of-graph-ownership)) |
+| `verification_efficiency` | what was safely skipped vs unnecessarily rechecked |
+| `checkpoint_effectiveness` | how much historical synchronization a checkpoint enabled |
+| `backward_syncs` / `forward_syncs` | synchronization operations per run |
+| `relevance_precision` | relevant context found / total context traversed |
+| `traversal_coverage` | reachable relevant context / captured context |
+
+`missed_context` deserves emphasis: it is the measurement of what the harness *didn't
+look at* — inferable only where the session graph holds the relationship evidence, and
+therefore always reported as a lower bound. A harness that skips context is no longer
+invisible; its skips are on the ledger.
 
 ### The control profile — violations as a measurement set
 
@@ -1181,14 +1755,15 @@ That is studying the **system** instead of pretending the model is the entire ag
 
 ---
 
-## 17. Overhead accounting
+## 20. Overhead accounting
 
 Per-tick enforcement has a cost, so it is measured like everything else. Enforcement is
 never free, and pretending otherwise would break the honesty of the whole instrument.
 
 | Metric | Meaning |
 |---|---|
-| `enforcement_overhead_per_tick` | latency added by steps 2–4 |
+| `enforcement_overhead_per_tick` | latency added by steps 2–5 |
+| `traversal_overhead_per_tick` | latency added by the strategy in step 3 |
 | `loops_fired_per_tick` | resolution breadth |
 | `verdicts_by_type` | CONTINUE / REPAIR / BACKTRACK / HALT distribution |
 | `ticks_held` | ticks gated by non-CONTINUE verdicts |
@@ -1208,7 +1783,7 @@ one level down.
 
 ---
 
-## 18. The control-factor space — taxonomy & planes
+## 21. The control-factor space — taxonomy & planes
 
 Hearth's traces make a kind of benchmark possible that single-score agent evaluation
 cannot attempt: measuring **control itself** as a space of independently addressable,
@@ -1231,7 +1806,7 @@ Four properties, all required:
 4. **Traced** — every factor observation lands in the canonical graph. Nothing is
    measured outside it.
 
-### The taxonomy — six control domains
+### The taxonomy — seven control domains
 
 ```text
                          CONTROL FACTOR SPACE
@@ -1244,6 +1819,12 @@ Four properties, all required:
 horizon  replan  order gate    stale-     correction  depth          intervention
 dep.pres.        verify irrev.   state      depth       coverage       unresolved
                  …      checkpoint integrity replay eff. false-positive rate
+                                                          │
+                                                   TRAVERSAL CONTROL
+                                                   strategy selection
+                                                   relevance precision
+                                                   coverage vs cost
+                                                   synchronization policy
 ```
 
 | Domain | Factors |
@@ -1254,8 +1835,11 @@ dep.pres.        verify irrev.   state      depth       coverage       unresolve
 | **Recovery control** | detection latency · correction depth · replay efficiency · recovery success |
 | **Verification control** | frequency · depth · coverage · false-positive burden |
 | **Supervision control** | escalation rate · intervention rate · unresolved findings |
+| **Traversal control** | strategy selection · relevance precision · coverage vs cost · synchronization policy |
 
-Each domain, each factor: **independently benchmarkable.**
+Each domain, each factor: **independently benchmarkable.** Traversal strategies are
+registered like loops and ablatable like factors — the navigation itself is a factor
+with states.
 
 ### The ablation ladder — the core experimental design
 
@@ -1286,6 +1870,7 @@ Every observation is a point in the factor space:
  level=L2,
  modality=code,
  tool=filesystem,
+ traversal_strategy=default.hybrid,
  R=3,
  checkpoint_policy=rolling,
  supervision=none)
@@ -1299,21 +1884,22 @@ The dimensions:
 
 ```text
 MODEL · HARNESS · CONTROL FACTOR · CONTROL LEVEL · MODALITY · TOOL · TASK
-REPLAY DEPTH · CHECKPOINT DEPTH · VERIFICATION DEPTH · SUPERVISION
-STATE-SYNC POLICY · MEMORY POLICY
+TRAVERSAL STRATEGY · REPLAY DEPTH · CHECKPOINT DEPTH · VERIFICATION DEPTH
+SUPERVISION · STATE-SYNC POLICY · MEMORY POLICY
 ```
 
 Which means the benchmark database is not a leaderboard. It is a **factorial dataset** —
 queryable, sliceable, recombinable. Any question of the form *"what does factor F
-contribute at level L under posture P?"* is a query, not a new benchmark.
+contribute at level L under posture P with strategy S?"* is a query, not a new
+benchmark.
 
 Factor definitions are registry objects — machine-readable, addressable like loops,
 versioned like contracts — so the taxonomy itself is part of the infrastructure, not a
-page in a paper ([Roadmap](#28-roadmap)).
+page in a paper ([Roadmap](#32-roadmap)).
 
 ---
 
-## 19. Benchmark: harness power === traversal power
+## 22. Benchmark: harness power === traversal power
 
 ### The R sweep
 
@@ -1405,7 +1991,7 @@ is actually external control?*
 
 The aggregate delta is only the headline. Because every finding is attributed to a loop,
 and every loop enforces a factor ([§11](#11-flash-control-loops),
-[§18](#18-the-control-factor-space--taxonomy--planes)), the delta decomposes per factor:
+[§21](#21-the-control-factor-space--taxonomy--planes)), the delta decomposes per factor:
 
 ```text
                 SHADOW → ENFORCED DELTA
@@ -1434,7 +2020,33 @@ An interaction larger than the sum of its parts means two factors compound — t
 gets more from verification *when replay backs it* than either buys alone. This is how
 the field moves from "agents need control" to **"these control factors matter, these
 interact, these are dead weight for this harness"** — the factor ablation ladder
-([§18](#18-the-control-factor-space--taxonomy--planes)) is the instrument.
+([§21](#21-the-control-factor-space--taxonomy--planes)) is the instrument.
+
+### The strategy sweep — benchmarking the traversal algorithm itself
+
+Because traversal strategies are registered, swappable, and canonical in their results
+([§18](#18-the-api-surface--four-contracts)), **the algorithm itself becomes an
+experimental variable**:
+
+```
+Harness A
+ ├── temporal
+ ├── dependency
+ ├── impact
+ └── hybrid
+```
+
+Change only the strategy and you measure:
+
+> **How much control capacity is obtained from a particular context-traversal policy,
+> at a particular cost?**
+
+That question — capacity per unit of traversal cost, per strategy — was previously
+unaskable. Strategy joins model × harness as a first-class benchmark axis, and strategy
+× R × factor interactions fall out of the same factorial dataset
+([§21](#21-the-control-factor-space--taxonomy--planes)). A learned/adaptive strategy
+from harness D does not require Hearth to be redesigned — it implements the same
+traversal contract and produces its own session trace.
 
 ### One model is enough — the expansion path
 
@@ -1498,7 +2110,146 @@ That is a measurable **control profile** — far more informative than
 
 ---
 
-## 20. Control economics — cost to correction
+## 23. The canonical baseline & unbiased aggregation
+
+**Defaults are not a contradiction to adaptability — they are the baseline against
+which adaptability can actually be measured.**
+
+Hearth carries a **canonical/default control + traversal configuration** while allowing
+every harness to override or replace individual components:
+
+```
+                         HEARTH
+                           │
+              CANONICAL / DEFAULT BASELINE
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+     Default Loops    Default Traversal   Default Sync
+          │                │                │
+          └────────────────┼────────────────┘
+                           │
+                    HARNESS ADAPTER
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+          Harness A     Harness B     Harness C
+          custom        custom        default +
+          strategy      strategy      extensions
+             │             │             │
+             └─────────────┼─────────────┘
+                           │
+                      SESSION TRACE
+                           │
+                    CANONICAL STORE
+                           │
+                 ┌─────────┴─────────┐
+                 │                   │
+             BENCHMARK          SIMULATION
+                 │                   │
+          individual results    eligible population
+                 │                   │
+                 └─────────┬─────────┘
+                           ↓
+                  UNBIASED AGGREGATION
+```
+
+### Benchmarking and aggregation are separate dimensions
+
+- **Benchmark** — *how did this specific model/harness perform under the canonical
+  conditions?* Its complete trace is preserved.
+- **Simulation** — *given the same underlying data/context/control problem, what
+  happens across every model/harness that satisfies the benchmark requirements?*
+
+You are not averaging arbitrary outputs. **Eligibility is established first:**
+
+```
+Model / Harness
+      │
+      ↓
+Requirements satisfied?
+      │
+   ┌──┴──┐
+   NO    YES
+   │      │
+exclude   ↓
+       simulation
+          │
+       normalized
+          │
+       aggregation
+```
+
+> **The aggregation population is defined by explicit requirements — never by which
+> model happens to be convenient, preferred, or selected beforehand.** That is what
+> makes the aggregation unbiased.
+
+### The default is the reference population
+
+The canonical baseline (default loops, default traversal, default sync) is the
+**control population**; custom harnesses are the **experimental variations**. Hearth
+therefore answers both:
+
+- *"What happens under our standard methodology?"* — the default baseline.
+- *"What happens when different models/harnesses/strategies are allowed to operate
+  against the same canonical problem?"* — the experimental population.
+
+### One model → many models, trivially
+
+If one model can be run through the control/traversal substrate, the same canonical
+problem can be replayed/simulated across the entire eligible model population:
+
+```
+                 CANONICAL PROBLEM
+                        │
+          ┌─────────────┼─────────────┐
+          ↓             ↓             ↓
+       Model A       Model B       Model C
+       Harness A    Harness B     Harness C
+          │             │             │
+          ↓             ↓             ↓
+      full trace     full trace     full trace
+          │             │             │
+          └─────────────┼─────────────┘
+                        ↓
+                 NORMALIZATION
+                        ↓
+              UNBIASED AGGREGATION
+                        ↓
+             BENCHMARK DISTRIBUTION
+```
+
+Aggregation operates at multiple dimensions:
+
+```
+                 AGGREGATION
+                      │
+       ┌──────────────┼──────────────┐
+       │              │              │
+     Model          Harness        Strategy
+       │              │              │
+       ├──────────────┼──────────────┤
+       │              │              │
+    Context        Control        Traversal
+       │              │              │
+       ├──────────────┼──────────────┤
+       │              │              │
+    Correction       Cost        Verification
+```
+
+> **Hearth isn't just measuring a winner.** It establishes the **behavioral
+> distribution of all qualifying systems under equivalent conditions** — while still
+> retaining each individual system's actual trace and correction history.
+
+That is a different benchmark architecture: **canonical baseline + pluggable execution +
+reproducible simulation + population-level aggregation.** And because Hearth is
+non-invasive — shadow capture plus captured traces — the simulation layer runs without
+touching or damaging the actual execution environments. Simulations, including across
+different models, can run now, against captures that already exist.
+
+---
+
+## 24. Control economics — cost to correction
 
 Hearth's traces make the *economics* of control measurable — what correction costs,
 when it is worth it, and what corners actually cost when they are cut. This is the
@@ -1567,6 +2318,24 @@ detection depth, replay, synchronization, and invalidation are all traced per ti
 Cost-cutting on control is no longer invisible — it is a debt, and the trace is the
 ledger.
 
+### Context economics — the cost of what was skipped
+
+The preserve chain ([§17](#17-the-session--the-unit-of-graph-ownership)) prices the
+negative space:
+
+- **Missed context cost** — context skipped at tick T that was discovered downstream
+  the hard way: the correction it forced, the replay it demanded, the invalidation it
+  caused. The gap between `missed_context` and `correction_depth` is the price of not
+  looking.
+- **Verification efficiency** — what was safely skipped versus unnecessarily rechecked.
+  A harness that rechecks everything is safe and expensive; a harness that skips
+  everything is cheap until it isn't. The trace prices both.
+- **Checkpoint effectiveness** — how much historical synchronization each checkpoint
+  enabled. Checkpoints are not free; this metric says what they bought.
+
+Together these answer, per harness and per strategy: *at what traversal depth does this
+harness stop synchronizing state, and what did that eventually cost?*
+
 ### Counterfactual back-simulation — one run, many policies
 
 One real execution captures everything needed to ask:
@@ -1600,7 +2369,10 @@ If stale state had been detected:                 how many downstream ticks beco
 
 The trace becomes a **counterfactual control laboratory** — the error-to-correction
 relationship measured *with* intervention and *without* it, from the same recorded
-behavior.
+behavior. The same laboratory extends to traversal strategies: replay the captured
+session under `default.temporal` vs `default.hybrid` vs a registered harness strategy,
+and compare the correction each would have produced
+([§22](#22-benchmark-harness-power--traversal-power)).
 
 ### Counterfactual validity — three tiers, declared
 
@@ -1614,7 +2386,7 @@ therefore tiers every counterfactual and records the tier with the result:
 | 3 | **World-generation** | what would a *different model* have done downstream? | **not simulation** — requires live re-execution; the capture cannot know an unbuilt world |
 
 No simulation pretends to be more valid than it is. **Tier is a field on every
-counterfactual result** ([Invariant #18](#25-design-invariants)). This distinction is
+counterfactual result** ([Invariant #18](#29-design-invariants)). This distinction is
 what keeps the back-simulation laboratory scientifically honest instead of quietly
 overclaiming.
 
@@ -1641,13 +2413,13 @@ Shadow mode is what makes this honest: the harness behaves unassisted, Hearth re
 what *would* have intervened — so the intervention / no-intervention contrast is
 **measured, not assumed**. Per-policy correction cost, per-depth inefficiency, and the
 price of skipped synchronization all fall out of the same paired records
-([§19](#19-benchmark-harness-power--traversal-power)).
+([§22](#22-benchmark-harness-power--traversal-power)).
 
 Detect, attribute, correct, measure, simulate, price — **one engine, six outputs.**
 
 ---
 
-## 21. Drift — detection, attribution, correction, recurrence
+## 25. Drift — detection, attribution, correction, recurrence
 
 Drift tracking is **not another subsystem**. It is a natural consequence of the core:
 Hearth observes control behavior → deviations become findings → findings trigger the
@@ -1706,7 +2478,7 @@ tool.gate
 **The drift measurement falls out of the loop's own enforcement records.** No separate
 drift detector is pointed at the harness; the loops *are* the detector. Drift
 attribution and factor attribution are the same mechanism viewed at different
-granularities ([§18](#18-the-control-factor-space--taxonomy--planes)).
+granularities ([§21](#21-the-control-factor-space--taxonomy--planes)).
 
 ### The drift lifecycle
 
@@ -1763,7 +2535,7 @@ Detect, attribute, correct, measure, track recurrence — **one engine, five out
 
 ---
 
-## 22. The supervisor — the control plane
+## 26. The supervisor — the control plane
 
 The supervisor is not just "the outermost loop." It is the **human/system control
 plane** above the entire kernel:
@@ -1845,27 +2617,30 @@ That is a legitimate capability dimension, and it was previously unmeasured.
 
 ---
 
-## 23. The kernel contract — frozen
+## 27. The kernel contract — frozen
 
 Everything in this document deploys or composes the following. This is the part every
 feature must prove itself against, and it is frozen:
 
 ```text
-Tick → Loop resolution → Step → Verdict aggregation → Checkpoint/repair → Trace → Release
+Tick → Loop resolution → Traversal → Step → Verdict aggregation
+     → Context sync → Checkpoint/repair → Trace → Release
 ```
 
 The actual shape:
 
 ```text
-                 CONTRACTS
-                     │
-                     ▼
-HOST ──► TICK ──► RESOLVE ──► LOOPS ──► VERDICT
-                     │                    │
-                     │                    ▼
-                     │              REPAIR / BACKTRACK
-                     │                    │
-                     ▼                    ▼
+                 CONTRACTS              SESSION GRAPH (per session)
+                     │                        │
+                     ▼                        │
+HOST ──► TICK ──► RESOLVE ──► TRAVERSE ──► LOOPS ──► VERDICT
+                     │             ▲                   │
+                     │        TRAVERSAL API             ▼
+                     │      (pluggable strategies)  SYNC / REPAIR / BACKTRACK
+                     │             │                   │
+                     │         CONTEXT API ◄───────────┘
+                     │      (backward + forward sync)
+                     ▼                    │
                   TRACE ◄──────────── CHECKPOINTS
                      │
                      ▼
@@ -1874,28 +2649,37 @@ HOST ──► TICK ──► RESOLVE ──► LOOPS ──► VERDICT
 
 The frozen statements:
 
-1. **The pipeline is fixed.** One event → one pipeline run → one tick record. Loops add
-   checks; nothing adds ticks.
+1. **The pipeline is fixed.** Eight steps: intercept, resolve, traverse, step,
+   aggregate, sync, emit, release. One event → one pipeline run → one tick record.
+   Loops add checks; strategies add traversal — nothing adds ticks or steps.
 2. **The verdict protocol is closed.** `CONTINUE / REPAIR / BACKTRACK(d) / HALT` —
    worst verdict wins, `dmax` on competing backtracks, nothing else escapes the core.
 3. **The capability boundary is declared.** Hearth defines what must be observable, what
    may be intercepted, what may be gated, and what verdicts mean; the adapter declares
    what the host actually provides; the declaration ships with every trace.
 4. **The trace is the substrate.** Every tick is recorded into the canonical traversal
-   graph; every metric — **including every control factor** — is derived from it;
-   nothing is measured outside it.
+   graph; every metric — **including every control factor and every traversal record** —
+   is derived from it; nothing is measured outside it.
 5. **Release authority is the only variable.** Observe, audit (shadow/active), enforce
    (auto/supervised) — same path, different authority. Benchmarking and meta-harnessing
    are one mechanism.
+6. **The canonical model is frozen; traversal implementations never are.** Hearth owns
+   what happened, what was verified, what was released; the harness owns how it
+   navigates. Strategies are pluggable; results are canonical.
+7. **Sessions own their graphs.** No global universal context exists; every session
+   builds its own world model, and the store never collapses it to a final answer.
+8. **Defaults define the reference population.** The canonical baseline is what
+   adaptability is measured against, and aggregation runs over eligible systems only —
+   eligibility explicit, never convenient.
 
 Everything else — native mode, meta mode, host mode, modality loops, tool loops, scenario
-loops, bundles, adapters, registries, the browser extension, the supervisor surfaces,
-drift reporting, control economics, counterfactual simulation — is **how you deploy and
-compose this kernel**.
+loops, bundles, adapters, registries, traversal strategies, the browser extension, the
+supervisor surfaces, drift reporting, control economics, counterfactual simulation,
+aggregation — is **how you deploy and compose this kernel**.
 
 ---
 
-## 24. Quick start
+## 28. Quick start
 
 *(illustrative API — shape is stable, names may move)*
 
@@ -1906,9 +2690,10 @@ from hearth import Hearth
 
 h = Hearth(config="hearth.config.yaml")
 h.goal("/goal: ship the refactor with zero regressions")
-result = h.run()            # enforces ordering, replays, backtracks as findings demand
+result = h.run()            # enforces ordering, traverses context, syncs, backtracks as findings demand
 
 print(result.aitd)          # [12, 28, 25, 8]
+print(result.depth_vector)  # all nine depths
 print(result.verdicts)      # every CONTINUE / REPAIR / BACKTRACK / HALT, in order
 ```
 
@@ -1959,12 +2744,34 @@ class VisionLoop(ControlLoopModule):
 hearth.register(VisionLoop)
 ```
 
+### Register a traversal strategy
+
+```python
+from hearth import TraversalStrategy
+
+class DependencyFirst(TraversalStrategy):
+    id = "harness-x.context.dependency"
+    version = "1.0"
+    capabilities = {"dependency_walk", "impact_discovery"}
+    applicable_scopes = {"harness:my-agent-harness", "modality:code"}
+
+    def resolve_context(self, tick): ...
+    def find_dependencies(self, entity): ...
+    def find_impact(self, finding): ...
+    def select_checkpoints(self, context): ...
+    def traverse(self, graph, query): ...
+    def estimate_cost(self, plan): ...
+
+hearth.register_traversal(DependencyFirst)   # results canonical; navigation yours
+```
+
 ### Read the trace
 
 ```bash
 hearth trace   --run R001 --format canonical-graph
 hearth metrics --run R001 --metric aitd
-hearth depths  --run R001                      # the full depth vector, all eight
+hearth depths  --run R001                      # the full depth vector, all nine
+hearth context --run R001 --tick T173 --show impact-subgraph
 hearth drift   --harness codex --baseline v1.0 --compare v1.4
 hearth replay  --run R001 --depth 3            # reconstruct state at any traversal depth
 ```
@@ -1974,27 +2781,41 @@ hearth replay  --run R001 --depth 3            # reconstruct state at any traver
 ```bash
 hearth factors  --run R001 --report deltas        # per-factor shadow→enforced deltas
 hearth cost     --run R001 --finding F12          # cost-to-correction decomposition
+hearth missed   --run R001                        # skipped context, lower-bound report
 hearth simulate --run R001 --policy R=7 --tier state-bound   # back-simulation, tier declared
+hearth simulate --run R001 --strategy default.hybrid --tier state-bound
 hearth ablate   --factor tool.verify --state absent --workload swe-bench-lite
+```
+
+### Aggregate across the eligible population
+
+```bash
+hearth aggregate --workload swe-bench-lite \
+                 --eligible-only \
+                 --group-by harness,strategy \
+                 --output distribution
 ```
 
 ---
 
-## 25. Design invariants
+## 29. Design invariants
 
 1. **No artifact is trusted without a loop over it.**
 2. **Every loop is a module.** One contract, no exceptions.
-3. **Every iteration emits a trace record.** No silent steps.
+3. **Every iteration emits a trace record.** No silent steps — and no silent traversals;
+   the traversal record itself is emitted.
 4. **Outer owns ordering; inner yields.**
 5. **Only the four verdicts escape the core.** Nothing else crosses the boundary.
-6. **R is dynamic — and recorded per step.**
+6. **R is dynamic — and recorded per step.** R is the bounded default; graph traversal
+   extends the window along relationship edges when relevance demands it.
 7. **Native, meta, host: zero architectural change between modes.**
 8. **Hearth does not compete for "who is the agent" — it owns "did the stored
    obligations still hold."**
 9. **Stopping is always a verdict, never a silent end.** Every loop has a soft budget;
    exhaustion surfaces as `HALT` to the supervisor — never a quiet fade.
 10. **Hearth reads ticks; it never rewrites them.**
-11. **The pipeline is fixed; loops add checks, never ticks.** Addition is monotonic.
+11. **The pipeline is fixed (eight steps); loops add checks and strategies add
+    traversal — never ticks or steps.** Addition is monotonic.
 12. **Worst verdict wins — and on competing `BACKTRACK` depths, `dmax` wins.** Many
     reviewers, one gate; disagreement degrades toward caution, never toward optimism.
     Dissenting findings are recorded, not discarded.
@@ -2007,7 +2828,7 @@ hearth ablate   --factor tool.verify --state absent --workload swe-bench-lite
     data model at write time, not by convention.
 16. **Supervision demand is a first-class measurement.** How much external control a
     system requires to remain correct is a capability dimension, reported per run.
-17. **The depth family is never collapsed.** Eight depths, one vector — collapsing them
+17. **The depth family is never collapsed.** Nine depths, one vector — collapsing them
     destroys exactly the information the benchmark exists to produce.
 18. **Every counterfactual declares its tier.** State-bound, checkpoint re-execution, or
     world-generation — no simulation pretends to be more valid than it is.
@@ -2015,10 +2836,25 @@ hearth ablate   --factor tool.verify --state absent --workload swe-bench-lite
     strengthened, or enforced — and the ablation is itself a traced run.
 20. **Hearth is the substrate, not a factor.** It measures and enforces the
     control-factor space; it is not one axis within it.
+21. **Freeze the canonical model; never freeze traversal.** Hearth owns what happened
+    and what was released; the harness owns how it navigates. Strategies are pluggable;
+    results are canonical.
+22. **Sessions own their graphs.** No global universal context — every session builds
+    its own world model, and Hearth supplies control semantics around it, never an
+    ontology for it.
+23. **The skipped is recorded.** What was traversed, inspected, *skipped*, discovered
+    later, corrected, and released — all preserved; the store never collapses to a
+    final answer.
+24. **Traversal strategies are first-class registrable objects** — benchmarked like
+    factors, swappable like loops, canonical like verdicts.
+25. **Defaults are the reference population.** The canonical baseline is what
+    adaptability is measured against.
+26. **Aggregation is over the eligible, only.** The population is defined by explicit
+    requirements — never by convenience, preference, or prior selection.
 
 ---
 
-## 26. Limitations
+## 30. Limitations
 
 Stated plainly, because a harness that demands honesty from its hosts should show some:
 
@@ -2027,7 +2863,7 @@ Stated plainly, because a harness that demands honesty from its hosts should sho
 - **Adaptive-R rules are policy.** The dynamic-R table is a sensible default, not a law
   of nature. It must be tuned per domain, and bad policy produces bad backtracks.
 - **Replay costs tokens and latency.** Overhead is measured
-  ([§17](#17-overhead-accounting)), not hidden. Cheap-tier checks are cheap; deep replays
+  ([§20](#20-overhead-accounting)), not hidden. Cheap-tier checks are cheap; deep replays
   are not.
 - **ENFORCE requires gate + resume capabilities.** Hosts without them degrade along the
   control path — to AUDIT (shadow/active) or OBSERVE. That is a documented degradation
@@ -2047,16 +2883,28 @@ Stated plainly, because a harness that demands honesty from its hosts should sho
   captured / deterministic environments; world-generation (a different model producing a
   different downstream world) requires live runs. Every counterfactual result ships
   with its tier, and tier-3 claims must be backed by execution, not replay.
-- **The factor space is combinatorial.** Factors × levels × postures × R × models ×
-  harnesses explodes quickly. The taxonomy exists to make sampling principled, not
-  exhaustive — reported results must state which cells of the factor matrix they cover.
+- **Missed context is measurable only where the capture has evidence.** If the session
+  graph lacks the relationship edge, "missed" cannot be inferred — `missed_context` is
+  always a lower bound, and the evidence basis is recorded alongside it.
+- **Cross-strategy comparison requires the same session substrate.** Strategy A vs B is
+  sound only over the same captured graph and conditions; different sessions produce
+  different graphs by design — that is the point — so strategy comparisons are anchored
+  to shared substrates, and the anchoring is declared.
+- **The factor space is combinatorial.** Factors × levels × postures × strategies × R ×
+  models × harnesses explodes quickly. The taxonomy exists to make sampling principled,
+  not exhaustive — reported results must state which cells of the factor matrix they
+  cover.
+- **Aggregation inherits eligibility definition quality.** If the requirements are weak,
+  the "unbiased" population is weakly defined. The eligibility gate is part of the
+  benchmark's honesty, not an implementation detail — requirement profiles are versioned
+  and published alongside results.
 - **Design-stage numbers are illustrative.** The R-sweep, Hearth-Delta, and factor-delta
   tables show the axes, not earned results. The values are claims to be earned by the
-  benchmark suite ([§19](#19-benchmark-harness-power--traversal-power)), not facts yet.
+  benchmark suite ([§22](#22-benchmark-harness-power--traversal-power)), not facts yet.
 
 ---
 
-## 27. Prior art
+## 31. Prior art
 
 The full surveyed landscape — including hedged, verify-before-citing names — lives in
 [`docs/PRIOR_ART.md`](docs/PRIOR_ART.md). The solidly citable pieces:
@@ -2068,6 +2916,10 @@ The full surveyed landscape — including hedged, verify-before-citing names —
 - **Checkpoint + replay engineering** — save points, revalidate from them.
 - **Factorial experiment design** — factors, levels, interactions, ablation; the
   statistics the control-factor space imports.
+- **Graph traversal (BFS/DFS and friends)** — the strategy toolbox; in Hearth the
+  algorithms are pluggable strategies rather than a fixed implementation.
+- **Meta-analysis** — eligibility criteria and population-level aggregation over
+  studies; the discipline the aggregation layer imports.
 
 What did not appear as one named object: enforcement-over-artifacts as the *identity*
 of a harness, no-unbound-contracts by construction (structural, in the data model),
@@ -2077,12 +2929,15 @@ precedence, **the Hearth Delta as a benchmark of external-control contribution**
 **the control-factor space as a factorial benchmark substrate with ablation ladders and
 interaction measurement**, **counterfactual back-simulation over control policy with
 declared validity tiers**, **cost-to-correction as a decomposed benchmark metric**,
-supervision demand as a capability dimension, and AITD plus the canonical traversal
-graph as free measurement of harness power. The pieces existed. The binding did not.
+**traversal strategies as registered, benchmarkable, swappable objects over a canonical
+per-session evidence substrate**, **the canonical baseline + eligibility gate +
+population-level aggregation architecture**, supervision demand as a capability
+dimension, and AITD plus the canonical traversal graph as free measurement of harness
+power. The pieces existed. The binding did not.
 
 ---
 
-## 28. Roadmap
+## 32. Roadmap
 
 - [ ] Reference adapters — files, shell, browser
 - [ ] 3D adapters — Blender first (canonical graph is already software-agnostic)
@@ -2093,12 +2948,18 @@ graph as free measurement of harness power. The pieces existed. The binding did 
 - [ ] R-sweep benchmark suite — harness × model × replay depth
 - [ ] Shadow/enforced paired benchmark runner — automatic Hearth Delta computation
 - [ ] Drift time-series store — per-release baselines, attribution, recurrence tracking
-- [ ] **Control-factor registry** — machine-readable factor taxonomy, addressable like loops
-- [ ] **Factor ablation runner** — present / absent / weakened / strengthened / enforced sweeps
-- [ ] **Counterfactual back-simulation engine** — tier-1 state-bound first; tier-2 over captured environments
-- [ ] **Cost-to-correction reporter** — detection / sync / rollback / replay / re-execution / invalidation decomposition
-- [ ] **Factor interaction analyzer** — pairwise and joint deltas from paired runs
-- [ ] **Depth-vector reporter** — all eight depths per run, never collapsed
+- [ ] Control-factor registry — machine-readable factor taxonomy, addressable like loops
+- [ ] Factor ablation runner — present / absent / weakened / strengthened / enforced sweeps
+- [ ] Counterfactual back-simulation engine — tier-1 state-bound first; tier-2 over captured environments
+- [ ] Cost-to-correction reporter — detection / sync / rollback / replay / re-execution / invalidation decomposition
+- [ ] Factor interaction analyzer — pairwise and joint deltas from paired runs
+- [ ] Depth-vector reporter — all nine depths per run, never collapsed
+- [ ] **Default traversal strategy suite** — temporal / dependency / blast_radius / hybrid
+- [ ] **Traversal strategy SDK + registry** — register, validate, version harness strategies
+- [ ] **Context inspector** — per-tick impact-subgraph viewer over the session graph
+- [ ] **Missed-context analyzer** — lower-bound reporting with evidence caveats
+- [ ] **Eligibility gate + requirement profiles** — explicit, versioned population definitions
+- [ ] **Aggregation engine** — normalization, population distributions, multi-dimensional slices
 - [ ] Flash-loop registry — community loops, scoped and composable
 - [ ] Bundle registry — portable enforcement profiles across harnesses
 - [ ] Compliance-ladder adapters — AUDIT shadow runners for pause-less hosts
@@ -2110,7 +2971,7 @@ graph as free measurement of harness power. The pieces existed. The binding did 
 
 ---
 
-## 29. FAQ
+## 33. FAQ
 
 **Is this another agent framework?**
 No. It is an enforcement kernel — the control layer frameworks lack. Run it native, or
@@ -2125,13 +2986,51 @@ engine; the deployment chooses the authority.
 No — and this matters. Hearth is the measurement/enforcement substrate for the
 control-factor space. It measures and enforces factors; it is not one axis among them
 (Invariant #20). The factors are verification, gating, synchronization, replay,
-escalation; Hearth is the instrument that prices them.
+escalation, traversal; Hearth is the instrument that prices them.
 
 **What is a control factor?**
 An independently addressable control behavior — verification, gating, synchronization,
 replay, escalation — that can be present, absent, weakened, strengthened, or enforced,
 produces measurable intervention, and is fully traced. Loops enforce factors; the
 taxonomy names what the loops measure.
+
+**Does Hearth replace my harness's context model?**
+No. The session owns its graph — it is the harness's world model, in whatever shape the
+harness builds it. Hearth supplies the control semantics *around* that graph and never
+imposes an ontology on it (Invariant #22).
+
+**My harness has a better traversal algorithm — can it compete?**
+Register it. Traversal strategies are first-class registrable objects — swappable like
+loops, benchmarked like factors, canonical in their results. You're not measured on
+using Hearth's navigation; you're measured on what your navigation achieves
+([§22](#22-benchmark-harness-power--traversal-power)).
+
+**What is the difference between temporal and context traversal?**
+Temporal traversal is the execution timeline — T1→T2→T3. Context traversal is the
+dependency space — which prior state is causally or contractually relevant to the
+current tick. "Look back R ticks" is the bounded default; the graph extends the window
+along relationship edges when relevance demands it. Both readings live on the same
+canonical graph.
+
+**What is "missed context"?**
+Context that should have been traversed but wasn't — the negative space of the
+traversal record. It is measurable wherever the session graph holds the relationship
+evidence, and it is always reported as a lower bound, with the evidence basis recorded.
+A harness that skips context is no longer invisible; its skips are on the ledger
+([§17](#17-the-session--the-unit-of-graph-ownership), [§19](#19-metrics-for-free)).
+
+**Why do defaults matter if everything is pluggable?**
+Because adaptability is only measurable against a fixed reference. The canonical
+baseline (default loops, default traversal, default sync) is the control population;
+custom harnesses are experimental variations. Without the baseline, "adaptable" is
+unfalsifiable (Invariant #25).
+
+**What does "unbiased aggregation" mean here?**
+The aggregation population is defined by explicit, versioned eligibility requirements —
+never by which model is convenient, preferred, or pre-selected. Every qualifying
+system's full trace is retained; the aggregate is a behavioral distribution over
+equivalent conditions, not a winner announcement
+([§23](#23-the-canonical-baseline--unbiased-aggregation)).
 
 **Can one recorded run really benchmark many control policies?**
 Tier-1 counterfactuals, yes — state-bound questions ("would R=7 have caught this?") are
@@ -2146,11 +3045,11 @@ Detection, synchronization, rollback, replay, re-execution, and downstream inval
 problem, which is why "the economic value of verification" is a measurable quantity
 here rather than a slogan.
 
-**Why eight depths instead of one number?**
+**Why nine depths instead of one number?**
 Because collapsing them destroys the measurement. Traversal, serialization, replay,
-correction, backtrack, dependency, synchronization, and verification depth describe
-different behaviors; the depth vector reports all eight, and the difference between
-harnesses lives in its shape (Invariant #17).
+correction, backtrack, dependency, context, synchronization, and verification depth
+describe different behaviors; the depth vector reports all nine, and the difference
+between harnesses lives in its shape (Invariant #17).
 
 **Does it replace my harness?**
 No. It can wear your harness or be worn by it. Both directions are first-class
@@ -2174,9 +3073,9 @@ and adding one never changes the cadence.
 
 **What is a tick?**
 The atomic unit. Every prompt, tool call, or state change the host emits is one tick,
-and one tick runs the fixed six-step pipeline: intercept, resolve, step, aggregate,
-emit, release. One event → one pipeline run → one tick record. A host "turn" may span
-many ticks; Hearth counts ticks, never host turns.
+and one tick runs the fixed eight-step pipeline: intercept, resolve, traverse, step,
+aggregate, sync, emit, release. One event → one pipeline run → one tick record. A host
+"turn" may span many ticks; Hearth counts ticks, never host turns.
 
 **What if my harness can't pause?**
 Declare its real capabilities. It gets AUDIT — shadow or active — the identical pipeline
@@ -2228,20 +3127,20 @@ A hearth is the heart of a structure — everything else gets built around it.
 Enforcement-over-state is the organ other harnesses are missing.
 
 **What does it measure?**
-Whatever it enforces. Ticks per level, the eight-depth vector, blast radius, active
+Whatever it enforces. Ticks per level, the nine-depth vector, blast radius, active
 sets, traversal coverage, its own overhead — plus violation rates, control delta,
-factor deltas, interactions, cost to correction, counterfactuals, supervision demand,
-and drift. The instrument and the enforcer are the same object.
+factor deltas, interactions, cost to correction, missed context, counterfactuals,
+supervision demand, and drift. The instrument and the enforcer are the same object.
 
 ---
 
-## 30. Glossary
+## 34. Glossary
 
 | Term | Definition |
 |---|---|
 | **Control-Loop Harness** | master rolling-horizon loop + registry of sub loops; makes stored state enforceable |
 | **Enforcement kernel** | the frozen core: binds obligations to loops, evaluates at host-event boundaries, gates through four verdicts, records the canonical trace |
-| **Tick** | the atomic unit — one host event run through the fixed six-step pipeline; an iteration is one tick |
+| **Tick** | the atomic unit — one host event run through the fixed eight-step pipeline; an iteration is one tick |
 | **Event identity / iteration identity** | every event is exactly one tick; a host turn may span many ticks — metrics count ticks, never host turns |
 | **Flash loop** | swappable control-loop module, flashed into the vest at runtime; the executable embodiment of one or more control factors |
 | **The vest** | the loop registry — a kit, not a strap; a routing table of scope keys |
@@ -2249,11 +3148,14 @@ and drift. The instrument and the enforcer are the same object.
 | **Scope key** | the address of a loop's jurisdiction — `harness:`, `modality:`, `tool:`, `scenario:` |
 | **Serialization level** | a loop's nesting depth in the registry, declared at registration — fixed for the run; what AITD indexes |
 | **Traversal depth** | path length in the canonical traversal graph, including revisits — distinct from serialization level |
-| **Depth vector** | the eight depths — traversal, serialization, replay, correction, backtrack, dependency, synchronization, verification — reported per run, never collapsed |
-| **Replay depth (R)** | how many prior checkpoints each step re-verifies; dynamic |
+| **Temporal traversal** | the execution-timeline reading of the graph — T1→T2→T3 |
+| **Context traversal** | the dependency/relationship reading of the graph — which prior state is causally or contractually relevant to the current tick |
+| **Impact subgraph** | the reachable affected state under applicable relationship semantics — depends_on / referenced_by / derived_from / modified_by / contract_dependency |
+| **Depth vector** | the nine depths — traversal, serialization, replay, correction, backtrack, dependency, context, synchronization, verification — reported per run, never collapsed |
+| **Replay depth (R)** | how many prior checkpoints each step re-verifies; dynamic; the bounded default that graph traversal extends |
 | **Forward horizon (H)** | how far ahead each step plans |
 | **AITD** | Agentic Iterative Traversal Depth — ticks per serialization level, reported as p50/p95 distributions |
-| **Blast radius** | downstream decisions invalidated by a correction |
+| **Blast radius** | downstream decisions invalidated by a correction — computed as reachable affected state in the impact subgraph |
 | **Correction depth** | how far backward a correction propagated |
 | **Checkpoint** | id + trace position + contract versions in force + state snapshot ref (or compensating-action descriptor) |
 | **Verdict** | `CONTINUE` / `REPAIR` / `BACKTRACK(d)` / `HALT` |
@@ -2273,14 +3175,31 @@ and drift. The instrument and the enforcer are the same object.
 | **Factor delta** | the shadow→enforced success delta attributed to a single factor |
 | **Interaction effect** | the measured joint deviation of two factors from the sum of their individual deltas — which controls compound |
 | **Factorial dataset** | the benchmark output — every observation a point in the factor space, queryable rather than ranked |
-| **Back-simulation** | counterfactual replay of a captured trace under a different control policy |
+| **Session** | the unit of graph ownership — one harness's one run, with its own native state, contracts, checkpoints, graph, loops, findings, impact regions, trace |
+| **Session graph** | the session's world model — built by the session, owned by the session; Hearth supplies control semantics around it, never an ontology for it |
+| **Canonical evidence substrate** | what the store says — states, checkpoints, relationships, impacts, controls, verifications per tick — never "how the harness traversed" |
+| **Traversal strategy** | a registered, versioned, scope-addressable navigation algorithm over the session graph; pluggable, benchmarkable, canonical in results |
+| **Traversal API** | the capability boundary exposing traversal primitives — get_checkpoint, get_impact_area, traverse_backward/forward, sync_to_checkpoint, … |
+| **Context API** | the boundary for backward/forward sync, relationship/impact queries, checkpoint synchronization |
+| **Control API / Trace API** | the two upper boundaries — loops/rules/verdicts/gates and canonical events/checkpoints/states |
+| **Traversal record** | the per-tick trace of nodes visited, edges followed, backtracks, forward syncs, and strategy used — emitted at step 7 |
+| **Missed context** | context that should have been traversed but wasn't — the negative space; always reported as a lower bound |
+| **Verification efficiency** | what was safely skipped vs unnecessarily rechecked |
+| **Checkpoint effectiveness** | how much historical synchronization a checkpoint enabled |
+| **Context depth** | the ninth depth — how deep in the relationship graph relevant prior state was found |
+| **Back-simulation** | counterfactual replay of a captured trace under a different control policy or traversal strategy |
 | **Counterfactual tier** | declared validity class of a simulation: state-bound / checkpoint re-execution / world-generation |
 | **Cost to correction** | detection + synchronization + rollback + replay + re-execution + downstream invalidation, decomposed per finding |
 | **Detection depth** | how long a defect survived before detection — the variable correction cost hinges on |
 | **Economic value of verification** | the measured downstream cost avoided by verification at a given depth — pricing the corners cut |
+| **Default baseline** | the canonical configuration — default loops, default traversal, default sync; the reference population |
+| **Reference population** | the control group of the benchmark — runs under the canonical baseline against which adaptability is measured |
+| **Eligibility gate** | explicit, versioned requirements a model/harness must satisfy to enter the aggregation population |
+| **Unbiased aggregation** | population-level aggregation over eligible systems only — defined by requirements, never by convenience; every member's full trace retained |
+| **Behavioral distribution** | the aggregate output — how all qualifying systems behave under equivalent conditions, rather than a single winner |
 | **Adapter capability** | declared host power: observe / intercept / gate / resume / inject / snapshot / compensate / supervise — `true`/`partial`/`false`, shipped with every trace |
 | **Non-rewrite guarantee** | Hearth gates the release of ticks; it never edits them — diffable, therefore testable |
-| **Canonical traversal graph** | software-agnostic record of every traversal event; the substrate for checkpoints, replay, drift, factors, economics, benchmarks, and supervision |
+| **Canonical traversal graph** | software-agnostic record of every traversal event; the substrate for checkpoints, replay, context traversal, drift, factors, economics, benchmarks, and supervision |
 | **Adapter** | maps a native harness/environment onto the canonical schema |
 | **Contract** | a stored obligation bound to a loop — structurally incapable of being stored unbound; always versioned |
 | **Drift** | change in control behavior over releases — detect, attribute, correct, measure, track recurrence |
@@ -2290,6 +3209,6 @@ and drift. The instrument and the enforcer are the same object.
 
 ---
 
-## 31. License
+## 35. License
 
 MIT
