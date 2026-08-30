@@ -2,9 +2,9 @@
 
 # Hearth
 
-### The Control-Loop Harness
+### The Control-Loop Harness — Enforcement Kernel & Harness-Independent Benchmark
 
-**Enforcement over artifacts.**
+**Enforcement over artifacts. Measurement and enforcement are the same control path with different release authority.**
 
 </div>
 
@@ -21,29 +21,33 @@
 
 1. [Why this exists](#1-why-this-exists)
 2. [The principle](#2-the-principle)
-3. [What it is](#3-what-it-is)
+3. [What it is — the kernel](#3-what-it-is--the-kernel)
 4. [The core loop](#4-the-core-loop)
 5. [Architecture](#5-architecture)
 6. [The tick — the atomic unit](#6-the-tick--the-atomic-unit)
 7. [The module contract](#7-the-module-contract)
-8. [Stacking & precedence](#8-stacking--precedence)
-9. [Three modes, one compliance ladder](#9-three-modes-one-compliance-ladder)
-10. [Flash control loops](#10-flash-control-loops)
-11. [The registries](#11-the-registries)
-12. [Harness registration](#12-harness-registration)
-13. [Contracts](#13-contracts)
-14. [The canonical traversal graph](#14-the-canonical-traversal-graph)
-15. [Metrics, for free](#15-metrics-for-free)
-16. [Overhead accounting](#16-overhead-accounting)
-17. [Benchmark: harness power === traversal power](#17-benchmark-harness-power--traversal-power)
-18. [Quick start](#18-quick-start)
-19. [Design invariants](#19-design-invariants)
-20. [Limitations](#20-limitations)
-21. [Prior art](#21-prior-art)
-22. [Roadmap](#22-roadmap)
-23. [FAQ](#23-faq)
-24. [Glossary](#24-glossary)
-25. [License](#25-license)
+8. [Stacking & precedence — levels, locked](#8-stacking--precedence--levels-locked)
+9. [Modes & release authority](#9-modes--release-authority)
+10. [Adapter capabilities — the declared boundary](#10-adapter-capabilities--the-declared-boundary)
+11. [Flash control loops](#11-flash-control-loops)
+12. [The registries](#12-the-registries)
+13. [Harness registration](#13-harness-registration)
+14. [Contracts](#14-contracts)
+15. [The canonical traversal graph](#15-the-canonical-traversal-graph)
+16. [Metrics, for free](#16-metrics-for-free)
+17. [Overhead accounting](#17-overhead-accounting)
+18. [Benchmark: harness power === traversal power](#18-benchmark-harness-power--traversal-power)
+19. [Drift — detection, attribution, correction, recurrence](#19-drift--detection-attribution-correction-recurrence)
+20. [The supervisor — the control plane](#20-the-supervisor--the-control-plane)
+21. [The kernel contract — frozen](#21-the-kernel-contract--frozen)
+22. [Quick start](#22-quick-start)
+23. [Design invariants](#23-design-invariants)
+24. [Limitations](#24-limitations)
+25. [Prior art](#25-prior-art)
+26. [Roadmap](#26-roadmap)
+27. [FAQ](#27-faq)
+28. [Glossary](#28-glossary)
+29. [License](#29-license)
 
 ---
 
@@ -72,6 +76,15 @@ Two failures nobody handles together:
 
 Hearth exists to close both gaps with one object.
 
+**And the third gap — the reason Hearth cannot be baked into one harness:**
+
+3. **No way to compare control across harnesses.** If the control machinery lives inside
+   one agent, you can measure that agent. If it is external and adaptable, you can measure
+   **the harness itself** — across Codex, Claude Code, ChatGPT, custom harnesses, browser
+   agents, any host — under identical contracts, identical tick semantics, identical
+   verdicts, identical trace, identical metrics. That is the difference between
+   benchmarking a product and benchmarking a category.
+
 ---
 
 ## 2. The principle
@@ -92,9 +105,20 @@ Almost none of them *enforce* it. Hearth is the component that makes state enfor
 
 ---
 
-## 3. What it is
+## 3. What it is — the kernel
 
-One sentence:
+The cleanest formulation, and the one that governs everything else in this document:
+
+> **Hearth is an enforcement kernel for stateful agent execution. It binds obligations to
+> executable control loops, evaluates those loops at host-event boundaries, gates
+> execution through a finite verdict protocol, and records the resulting control
+> trajectory as a canonical trace.**
+
+Native mode, meta mode, host mode, modality loops, tool loops, bundles, adapters,
+registries, the browser extension, the supervisor apps — these are **how you deploy and
+compose the kernel**, not competing definitions of what Hearth is.
+
+One sentence identity:
 
 > **A control-loop harness: a master rolling-horizon loop with a registry of stackable
 > sub-loop modules — runnable native, wrappable around other harnesses as a meta layer,
@@ -132,6 +156,30 @@ And the heart metaphor is load-bearing, not decorative: enforcement-over-state i
 organ most harnesses lack — which is exactly why other harnesses can be built *around*
 it, integrate *with* it, and register *into* it without changing what it is. It adapts
 cleanly into any harness, native or meta, as an add-on, a library, or an API.
+
+### The two contributions
+
+1. **The enforcement kernel** — binding obligations to loops, evaluating at host-event
+   boundaries, gating through four verdicts.
+2. **The canonical traversal graph** — enforcement history as a reusable substrate rather
+   than something thrown away after a verdict. The trace is not a log; it is the
+   measurement layer ([§15](#15-the-canonical-traversal-graph)).
+
+### Why benchmarking tool and meta harness are one product
+
+They are the same mechanism viewed from two directions:
+
+> **Measurement and enforcement are the same control path with different release
+> authority.**
+
+- Do not release the verdict → **benchmarking** (observe and measure the control loop).
+- Gate the verdict → **meta-harness** (participate in the control loop, enforce contracts).
+- Escalate the verdict → **supervisor** (delegate release authority upward).
+
+The distinction is not architectural. It is the degree of authority the deployment
+grants Hearth. That is also why something good enough to benchmark control can enforce
+control: it is the same engine, same events, same contracts, same trace — different
+authority.
 
 ---
 
@@ -189,6 +237,22 @@ Everything the enforcement core says is one of four things. Nothing else escapes
 | `REPAIR` | fix in place — re-verify before advancing |
 | `BACKTRACK(d)` | return *d* checkpoints, repair, re-advance |
 | `HALT` | stop — surface to supervisor or operator |
+
+### BACKTRACK semantics — three distinct phases
+
+`BACKTRACK(d)` names the *target checkpoint*. What happens afterward is **not one
+operation but three**, and a repair plan must declare which phases it involves:
+
+| Phase | Meaning | Example |
+|---|---|---|
+| **Rewind state** | restore the world to the checkpoint | revert files, restore scene state |
+| **Repair consequences** | compensate for effects already emitted downstream | fix the artifact that consumed bad output |
+| **Replay decisions** | re-execute from the checkpoint with corrected information | re-run the subtask with the finding applied |
+
+These are not equivalent. A host may be able to rewind but not replay, or replay without
+rewinding (forward-repair only). The checkpoint's compensating-action descriptor and the
+repair plan together declare exactly which phases execute. Declaring them separately is
+what makes `BACKTRACK(d)` honest across heterogeneous hosts.
 
 ### Checkpoints
 
@@ -257,6 +321,22 @@ This makes "iteration" exact: **an iteration is one tick.** Every replay, every
 verification, every trace record happens at tick boundaries. AITD is ticks per level —
 the metric and the mechanism share a unit.
 
+### Event identity vs iteration identity — stated precisely
+
+Host events differ wildly in granularity: a prompt is heavy, a state change can be
+tiny. Hearth resolves this by keeping two identities strictly separate:
+
+- **Event identity** — every host event is exactly one tick. No coalescing, no splitting.
+  One event in → one pipeline run → one tick record out. This is the invariant, and it
+  holds regardless of event size.
+- **Iteration identity** — a host "turn" or "step" may span *many* ticks. Hearth never
+  counts host turns; every metric, including AITD, is counted in ticks.
+
+The atomicity claim is therefore about the *pipeline*, not about events being equal in
+size: **one event → one pipeline run → one tick record.** Granularity differences
+between event classes are real, recorded (event class is a tick field), and never
+allowed to blur the count.
+
 ### The per-tick pipeline
 
 Fixed for every tick, native or meta, regardless of how many loops are loaded:
@@ -269,7 +349,7 @@ TICK
  3. STEP        each resolved loop steps — cheap checks first,
                 deep replay only on trigger
  4. AGGREGATE   one verdict per tick — worst verdict wins:
-                HALT > BACKTRACK(d) > REPAIR > CONTINUE
+                HALT > BACKTRACK(dmax) > REPAIR > CONTINUE
  5. EMIT        one trace record per loop + one tick record
  6. RELEASE     CONTINUE releases the tick to the host;
                 anything else holds, per verdict
@@ -338,9 +418,15 @@ repair goes unscheduled; no repair escapes re-verification.
 
 ---
 
-## 8. Stacking & precedence
+## 8. Stacking & precedence — levels, locked
 
-Loops nest by **serialization level**:
+Loops nest by **serialization level**. To treat AITD as a benchmark metric, what
+constitutes a level must be locked, so it is:
+
+> **Serialization level is a property of the registry, declared at registration —
+> not inferred from runtime behavior.** Each loop's registration names its parent
+> scope; the level is the depth of that nesting in the registry. L0 is the master
+> loop. A loop's level never changes mid-run.
 
 ```
 L0  orchestrator (master loop)
@@ -349,12 +435,35 @@ L2      tool / scenario loops
 L3        verification loops
 ```
 
+**Traversal depth is a different quantity entirely** — the length of the traversal path
+in the canonical graph ([§15](#15-the-canonical-traversal-graph)), including revisits.
+AITD is indexed by **serialization level**. The canonical graph records **traversal
+depth**. Both are kept, neither substitutes for the other.
+
 Precedence rules keep the stack coherent:
 
 - **Outer loop owns ordering. Inner loops yield.**
 - The **supervisory agent is the outermost loop** — it can raise replay depth or force a
   backtrack on anything below it.
 - `composes_with` rejects incompatible stacks at registration time, not at 3 AM.
+
+### Verdict aggregation — the tie-break, made explicit
+
+When multiple loops fire on one tick, worst verdict wins:
+
+```
+HALT  >  BACKTRACK(d)  >  REPAIR  >  CONTINUE
+```
+
+When two loops return `BACKTRACK` with **different depths**, the aggregation rule is:
+
+> **dmax wins.** The maximum required depth is the most conservative finding, and
+> conservatism is the direction disagreement must degrade in. (A lesser depth is
+> recorded in the trace as a dissenting finding — it is not lost, it is just not
+> the gate.)
+
+This is an invariant, not a convention
+([Invariant #12](#23-design-invariants)).
 
 ### What a run looks like — and why the depth data falls out
 
@@ -375,9 +484,100 @@ instrumentation structure.
 
 ---
 
-## 9. Three modes, one compliance ladder
+## 9. Modes & release authority
 
-### Native
+### The three capabilities, separated
+
+There are three distinct powers, and they are not the same:
+
+| Power | Meaning |
+|---|---|
+| **Observe** | Hearth sees what happened |
+| **Intercept** | Hearth sees it *before* it happens |
+| **Gate** | Hearth can prevent it from happening |
+
+A browser extension may observe a conversation but be unable to prevent an action. A CLI
+integration may intercept tool calls. A native adapter may have full synchronous gating.
+Modes are chosen per deployment, within what the adapter's capabilities permit
+([§10](#10-adapter-capabilities--the-declared-boundary)).
+
+### The control path — five postures
+
+The compliance ladder expands into the full control path. Every posture is the **same
+pipeline** ([§6](#6-the-tick--the-atomic-unit)) with different release authority:
+
+```
+                 HEARTH CONTROL PATH
+                         │
+                ┌────────┴────────┐
+                │                 │
+            OBSERVATION        INTERCEPTION
+                │                 │
+                ▼                 ▼
+             AUDIT             GATING
+                │                 │
+          ┌─────┴─────┐     ┌─────┴─────┐
+          ▼           ▼     ▼           ▼
+       SHADOW      ACTIVE  AUTO       SUPERVISED
+```
+
+| Posture | Pipeline timing | Release behavior | Asks |
+|---|---|---|---|
+| **OBSERVE** | synchronous, step 3 bypassed | trace only | *what happened?* |
+| **AUDIT / SHADOW** | asynchronous (shadow) | records findings; host continues | *what did the harness do wrong when nothing stopped it?* |
+| **AUDIT / ACTIVE** | asynchronous (shadow) | records findings **and** files actionable findings the supervisor or outer loop can act on between ticks | *what went wrong, and what should be done about it?* |
+| **ENFORCE / AUTO** | synchronous | gates on policy, automatically | *how does the harness perform when invalid progression is prevented?* |
+| **ENFORCE / SUPERVISED** | synchronous | gates and escalates the decision to the supervisor | *what does this system need from its supervisor to stay correct?* |
+
+These are **experimental configurations**, not mutually exclusive products. The same
+run can shadow-audit one scope while enforcing another.
+
+### Why shadow audit is a benchmark instrument, not a degraded mode
+
+Shadow audit answers a question no enforced mode can ask:
+
+> **What did the harness do wrong when nothing stopped it?**
+
+That quantifies raw capability:
+
+```text
+violations detected
+violations ignored
+violations self-corrected
+violations propagated
+eventual recovery
+irreversible violations
+supervision required
+```
+
+Enforced audit asks a different question:
+
+> **How does the harness perform when a control layer actively prevents invalid
+> progression?**
+
+That quantifies controlled capability. Run both and the difference between them is
+itself a benchmark — the **Hearth Delta**
+([§18](#18-benchmark-harness-power--traversal-power)).
+
+### The legacy ladder — mapped, not replaced
+
+The earlier three-level compliance ladder remains valid as a shorthand for what a host
+can honor, now derived from declared capabilities rather than assumed:
+
+| Level | Name | Requires | Maps to |
+|---|---|---|---|
+| 2 | **ENFORCE** | gate + resume capabilities | ENFORCE / AUTO or SUPERVISED |
+| 1 | **AUDIT** | intercept capability, no pause | AUDIT / SHADOW or ACTIVE |
+| 0 | **OBSERVE** | observe capability only | OBSERVE |
+
+A host that cannot pause still gets full shadow enforcement: the identical pipeline
+runs asynchronously, every violation is recorded, and enforcement is carried out by the
+outermost loop instead of inline. **No host is worth zero enforcement.** An
+uncooperative host gets shadow enforcement — not none.
+
+### Native, meta, host — unchanged
+
+**Native:**
 
 ```
 /goal → /subtask → execute → hooks → replay(R) → verify → /recap → next
@@ -385,7 +585,7 @@ instrumentation structure.
 
 Runs as its own harness. Nothing else required.
 
-### Meta — Hearth wears another harness
+**Meta — Hearth wears another harness:**
 
 ```
 HOST HARNESS ──native events──► ADAPTER ──canonical loop events──►
@@ -396,7 +596,9 @@ A host harness has exactly three obligations:
 
 1. Emit events (step done, tool call, file write, state change).
 2. Accept verdicts (`CONTINUE | REPAIR | BACKTRACK(d) | HALT`).
-3. Pause on `REPAIR` / `BACKTRACK` / `HALT` until released.
+3. Pause on `REPAIR` / `BACKTRACK` / `HALT` until released — *to the extent its
+   capabilities permit; otherwise it declares so and the posture degrades along the
+   control path, documented and recorded.*
 
 That's the entire integration surface. Same pattern for every host.
 
@@ -404,7 +606,7 @@ That's the entire integration surface. Same pattern for every host.
 the contract is one, outer owns ordering, and Hearth reads ticks without rewriting them
 ([the non-rewrite guarantee](#6-the-tick--the-atomic-unit)).
 
-### Host — other harnesses wear Hearth
+**Host — other harnesses wear Hearth:**
 
 External harnesses register **into** the vest as loop modules. Their native controls
 become loop steps; their uniqueness is preserved behind the one contract. A harness with
@@ -413,23 +615,6 @@ it stacks with everything else.
 
 **Both directions are first-class.** Hearth wraps harnesses. Harnesses wrap Hearth.
 It is the heart either way.
-
-### The compliance ladder
-
-Obligation 3 is not always available. Hosts differ in what they can honor, so
-compliance is a **declared spectrum**, not a hidden assumption. The per-tick pipeline
-is identical at every level — only its timing and gate change:
-
-| Level | Name | Host behavior | Pipeline timing | Gate at step 6 |
-|---|---|---|---|---|
-| 2 | **ENFORCE** | pauses on non-CONTINUE | synchronous | blocks the tick on non-CONTINUE |
-| 1 | **AUDIT** | cannot pause | asynchronous (shadow) | records the verdict, reports to supervisor |
-| 0 | **OBSERVE** | trace-only | synchronous, step 3 bypassed | trace only |
-
-A host that cannot pause still gets **full shadow enforcement**: the identical pipeline
-runs asynchronously, every violation is recorded, and enforcement is carried out by the
-outermost loop instead of inline. **No host is worth zero enforcement.** An
-uncooperative host gets shadow enforcement — not none.
 
 ### The ownership boundary
 
@@ -443,7 +628,115 @@ them for ownership of tools or personality.
 
 ---
 
-## 10. Flash control loops
+## 10. Adapter capabilities — the declared boundary
+
+This is the frozen boundary of the entire integration layer:
+
+> **Hearth never assumes how a host executes. Hearth defines what must be observable,
+> what may be intercepted, what may be gated, and what verdicts mean. The adapter
+> declares which of those capabilities the host actually provides.**
+
+This is what prevents Hearth from slowly becoming "a framework that happens to support
+Codex, Claude Code, ChatGPT, Blender, etc." Hearth stays the canonical protocol; hosts
+are adapters; the benchmark data stays comparable because the canonical control
+semantics stay fixed while the host implementation changes.
+
+### The capability matrix
+
+Every adapter declares exactly what it has:
+
+| Capability | Meaning |
+|---|---|
+| `observe` | Hearth can see the event (after the fact) |
+| `intercept` | Hearth sees the event before execution |
+| `gate` | Hearth can block execution |
+| `resume` | Hearth can release held execution |
+| `inject` | Hearth can provide controlled input / annotation (host opt-in only) |
+| `snapshot` | Hearth can capture state |
+| `compensate` | Hearth can provide inverse actions for checkpoints |
+| `supervise` | Hearth can escalate to the supervisor |
+
+Values: `true` / `partial` / `false`. Nothing is inferred. **The declaration is part of
+the benchmark configuration** — it ships with every trace, so any comparison between
+harnesses knows exactly what each adapter could and could not do.
+
+### Two real declarations
+
+A pause-capable CLI harness:
+
+```yaml
+adapter:
+  host: codex
+  capabilities:
+    observe_prompts: true
+    observe_tool_calls: true
+    observe_state_changes: partial
+    intercept_before_tool: true
+    pause_execution: true
+    resume_execution: true
+    inject_annotations: false
+```
+
+A browser client:
+
+```yaml
+adapter:
+  host: browser:chatgpt
+  capabilities:
+    observe_conversation: true
+    observe_proposals: true
+    intercept_before_tool: partial
+    pause_execution: false
+    resume_execution: false
+    inject_annotations: false
+    supervise: true        # escalates to supervisor surfaces
+```
+
+Hearth doesn't lie about the difference. It records it.
+
+### Posture is derived from capabilities, validated at registration
+
+`posture = f(capabilities, policy)`. A deployment requesting ENFORCE on an adapter
+without `gate` + `resume` fails at registration with a precise message — not at 3 AM,
+not silently. Requesting AUDIT/SHADOW always succeeds anywhere `observe` exists.
+
+### The browser extension — a first-class adapter
+
+The browser client is not a special product. It is an **observation/interception
+boundary** speaking the same canonical event protocol:
+
+```
+             HEARTH CORE
+                  │
+        canonical event protocol
+                  │
+       ┌──────────┼──────────┐
+       ▼          ▼          ▼
+    CLI/API    Browser     Native
+    Adapter    Adapter     Adapter
+       │          │           │
+       ▼          ▼           ▼
+    Codex      ChatGPT      custom
+    Claude     Claude       harness
+    etc.       Z.ai
+               Grok
+```
+
+Depending on what the browser environment permits, it maps into canonical events:
+
+```text
+conversation turn · model response · tool/action proposal · user intervention
+approval/rejection · visible state transition · timing · attachments · navigation
+```
+
+Then the same control machinery applies. The benchmark isn't "a benchmark for ChatGPT."
+It is:
+
+> **A harness-independent control benchmark — and ChatGPT is one adapter.**
+
+---
+
+## 11. Flash control loops
 
 A **flash loop** is a control loop packaged as a swappable module — flash it into the
 vest at runtime, per modality, per tool, per scenario, per level.
@@ -469,7 +762,7 @@ is monotonic, never a new cadence.
 
 ---
 
-## 11. The registries
+## 12. The registries
 
 The vest is a **routing table**, not a costume. Loops are addressable by **scope key**
 and resolve at tick time.
@@ -478,7 +771,7 @@ and resolve at tick time.
 
 ```
 REGISTRY
-├── harness registry     registered hosts: adapter, compliance level,
+├── harness registry     registered hosts: adapter, capabilities, posture,
 │                        attached bundles
 ├── modality registry    loops keyed by modality scope     (first-class)
 ├── tool registry        loops keyed by tool scope
@@ -535,18 +828,30 @@ chain, all resolved at tick time. No unbound contract, now at the routing layer 
 
 ---
 
-## 12. Harness registration
+## 13. Harness registration
 
-Register harnesses around Hearth, and harnesses into Hearth, from config:
+Register harnesses around Hearth, and harnesses into Hearth, from config — including
+the capability declaration that makes every comparison honest:
 
 ```yaml
 # hearth.config.yaml
 harness:
   mode: meta                    # native | meta | host
-  compliance: enforce           # enforce | audit | observe
+  compliance: enforce           # enforce | audit | observe   (validated against capabilities)
+  audit:
+    enforcement: shadow         # shadow | active              (audit flavor)
   host:
     id: my-agent-harness
     adapter: adapters/my_agent_harness.py
+    capabilities:
+      observe_prompts: true
+      observe_tool_calls: true
+      intercept_before_tool: true
+      pause_execution: true
+      resume_execution: true
+      snapshot: true
+      compensate: false
+      supervise: true
 
 loops:
   - id: modality.vision
@@ -581,7 +886,7 @@ control it.
 
 ---
 
-## 13. Contracts
+## 14. Contracts
 
 Hearth carries **multi-modal contracts** in the state store, each bound to a loop by
 construction:
@@ -597,6 +902,20 @@ A contract without a loop is a document. In Hearth, there is no way to store an 
 contract — the storage layer and the loop registry are coupled by design. Every stored
 obligation has a loop that drags execution back to it based on findings.
 
+### Binding is structural, not conventional
+
+"No unbound contract" is enforced **in the data model**, not merely by registration
+discipline:
+
+- The contract record's schema **requires** a `bound_loop` field — a foreign key into
+  the loop registry.
+- A write referencing a loop id that does not resolve **fails validation at write
+  time**. The store physically cannot persist an unbound contract.
+- Deleting or unloading a loop **fails while any contract references it** — obligations
+  cannot become orphaned by the registry changing underneath them.
+
+The strongest idea in the design should not depend on anyone remembering the rule.
+
 ### Contract versioning
 
 Contracts are **versioned**. The version in force is recorded in every checkpoint
@@ -607,7 +926,7 @@ gets replayed before the run proceeds.
 
 ---
 
-## 14. The canonical traversal graph
+## 15. The canonical traversal graph
 
 Every action, in any host environment, becomes the same record:
 
@@ -641,7 +960,9 @@ Collection → Object → Material → Object → Mesh → Face
 
 Traversal depth is 6 even where structural depth is 3. Revisits, replays, and
 backtracks are preserved, not collapsed. This distinction is why "depth" in Hearth means
-something no file tree can express.
+something no file tree can express — and why traversal depth (graph path length,
+including revisits) and serialization level (registry nesting) are reported as separate
+quantities ([§8](#8-stacking--precedence--levels-locked)).
 
 ### Example event
 
@@ -680,9 +1001,15 @@ Native application graph → canonical traversal graph → measurable traversal 
 The benchmark measures agent traversal capacity, not the peculiarities of any one tool's
 data model.
 
+**The trace is a substrate, not a log.** Enforcement history feeds checkpoints, replay,
+drift attribution ([§19](#19-drift--detection-attribution-correction-recurrence)),
+benchmarks ([§18](#18-benchmark-harness-power--traversal-power)), and the supervisor's
+view ([§20](#20-the-supervisor--the-control-plane)). The verdict consumes the tick; the
+graph keeps everything.
+
 ---
 
-## 15. Metrics, for free
+## 16. Metrics, for free
 
 The enforcement core is also the instrument. Every verdict, every iteration, emits a
 record. Nothing extra to wire — **the thing that enforces traversal is the same thing
@@ -740,9 +1067,52 @@ Harness C   12    41    63    27      143
 That is a concrete, structured, judge-free measurement of control-loop traversal
 capacity — and it falls out of normal operation.
 
+### The control profile — violations as a measurement set
+
+Because every tick is verified, violations are counted, not imagined:
+
+| Metric | Meaning |
+|---|---|
+| `native_violation_rate` | violations per tick observed in shadow — the harness unassisted |
+| `shadow_violation_rate` | same, per scope/loop attribution |
+| `prevented_violation_rate` | violations gated before execution under ENFORCE |
+| `repair_rate` | share of ticks resolved by in-place repair |
+| `backtrack_rate` | share of ticks requiring backward correction |
+| `supervisor_escalation_rate` | share of ticks requiring a supervisor decision |
+| `unresolved_violation_rate` | findings that neither repaired nor escalated |
+| `supervisor_interventions` | absolute count of supervisor decisions per run |
+
+And the headline pair — **kept deliberately distinct**, because they are different
+numbers:
+
+- **Correction rate** — the proportion of *behavior* Hearth corrected.
+- **Control delta** — the improvement in *outcome* (percentage points) that enforcement
+  produced.
+
+Two harnesses can have the same correction rate and different control deltas, and vice
+versa. Collapsing them would make the benchmark scientifically useless.
+
+### Layered measurement — separating model, harness, and control
+
+Because Hearth is external, the same task decomposes:
+
+```text
+MODEL
+  ↓
+MODEL + HARNESS
+  ↓
+MODEL + HARNESS + HEARTH
+```
+
+Separating: model capability · harness capability · tool-calling capability ·
+planning/control capability · compliance · regression rate · recovery capability ·
+supervision burden · traversal depth · enforcement overhead.
+
+That is studying the **system** instead of pretending the model is the entire agent.
+
 ---
 
-## 16. Overhead accounting
+## 17. Overhead accounting
 
 Per-tick enforcement has a cost, so it is measured like everything else. Enforcement is
 never free, and pretending otherwise would break the honesty of the whole instrument.
@@ -769,7 +1139,9 @@ one level down.
 
 ---
 
-## 17. Benchmark: harness power === traversal power
+## 18. Benchmark: harness power === traversal power
+
+### The R sweep
 
 Same model. Same task. Same tools. Sweep only **R**:
 
@@ -790,6 +1162,33 @@ The interesting result is never "more replay = better." It is the **Pareto front
 the replay depth where the reliability gain stops being worth the cost. For Hearth,
 adaptive R lands near full-trajectory reliability at a fraction of the cost.
 
+### Why external is the only way this benchmark exists
+
+```text
+                 SAME TASK
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+     Codex       Claude       ChatGPT
+        │           │           │
+        ▼           ▼           ▼
+     Hearth      Hearth       Hearth
+        │           │           │
+        └───────────┼───────────┘
+                    ▼
+             SAME CONTRACT
+             SAME TICK MODEL
+             SAME VERDICTS
+             SAME TRACE
+             SAME METRICS
+                    │
+                    ▼
+              COMPARABLE DATA
+```
+
+Bake the control machinery into one harness and you can measure that harness. Keep it
+external and you can measure **the harness itself** — which is the entire point.
+
 Cross harnesses × models on the same sweep and you answer the question single-score
 agent benchmarks cannot:
 
@@ -799,9 +1198,321 @@ agent benchmarks cannot:
 Capability should be reported at the model × harness configuration level. Hearth makes
 that not just possible but automatic.
 
+### Shadow vs enforced — the Hearth Delta
+
+Run every harness twice — once shadow, once enforced — and the difference becomes a
+first-class benchmark:
+
+```text
+Harness A
+  Shadow success:       72%
+  Enforced success:     91%
+  Control delta:       +19pp
+  Correction rate:      19%
+  → Native control is weak. Hearth compensates heavily.
+    19% of behavior required external correction.
+
+Harness B
+  Shadow success:       86%
+  Enforced success:     89%
+  Control delta:        +3pp
+  Correction rate:       3%
+  → Native control is already strong. Hearth mostly verifies.
+```
+
+Harness A may have a much weaker native control loop but benefit enormously from
+external enforcement. Harness B already has strong internal controls. Ordinary agent
+benchmarks expose none of this — both might post similar single scores.
+
+The **Hearth Delta** is the answer to: *how much of this harness's apparent capability
+is actually external control?*
+
+### The control profile — the behavioral fingerprint
+
+Per harness, per run, per release:
+
+```text
+                HARNESS CONTROL PROFILE
+
+Native success                 84%
+Shadow violations               9%
+Enforced success               91%
+External correction             7%
+Backtrack rate                  2%
+Repair rate                     5%
+Supervisor escalation           1%
+Persistent drift                3%
+Recovery success               94%
+Control overhead                1.7×
+```
+
+Same contracts applied across harnesses → comparable control fingerprints. This is the
+benchmark output, not a summary statistic.
+
+### Auto mode vs approval mode
+
+The same harness may run autonomous or with human approval gates. Hearth benchmarks
+**both**, and measures **how much supervision the harness actually needs**:
+
+```text
+Tool calls:              183
+CONTINUE:                151
+REPAIR:                   17
+BACKTRACK:                 9
+SUPERVISOR REQUEST:        6
+HALT:                      0
+```
+
+That is a measurable **control profile** — far more informative than
+"agent completed task: yes."
+
 ---
 
-## 18. Quick start
+## 19. Drift — detection, attribution, correction, recurrence
+
+Drift tracking is **not another subsystem**. It is a natural consequence of the core:
+Hearth observes control behavior → deviations become findings → findings trigger the
+existing verdict/repair/replay machinery → the resulting history is the benchmark.
+
+### Drift is a time series
+
+Instead of "Harness A = 72%," the same contracts re-run across harness releases give:
+
+```text
+                     Native      Hearth
+                     Success     Correction
+────────────────────────────────────────────
+Version 1.0           86%          4%
+Version 1.1           84%          6%
+Version 1.2           81%          9%
+Version 1.3           76%         14%
+Version 1.4           72%         19%
+```
+
+The benchmark doesn't merely say "Version 1.4 is worse." It says:
+
+> **The harness increasingly violated the same control contracts, and Hearth had to
+> compensate for progressively more of that drift.**
+
+### Attribution — knowing *where* it drifts
+
+Because every tick is attributed to a scope and every finding to a loop, drift
+decomposes for free:
+
+```text
+Harness A
+│
+├── planning           drift +4%
+├── tool calling       drift +9%
+├── verification       drift +2%
+├── state management   drift +3%
+└── recovery           drift +1%
+```
+
+And one level deeper, down to individual loops:
+
+```text
+tool.filesystem
+    ├── read-before-write violations
+    ├── stale-state usage
+    ├── unnecessary retries
+    └── missing verification
+
+tool.gate
+    ├── irreversible action attempted
+    ├── replay required
+    └── supervisor escalation
+```
+
+**The drift measurement falls out of the loop's own enforcement records.** No separate
+drift detector is pointed at the harness; the loops *are* the detector.
+
+### The drift lifecycle
+
+```text
+DETECT DRIFT
+      ↓
+ATTRIBUTE DRIFT
+      ↓
+CORRECT DRIFT        ← reuses REPAIR / BACKTRACK / replay — no new machinery
+      ↓
+MEASURE CORRECTION
+      ↓
+TRACK WHETHER DRIFT RETURNS
+```
+
+The last stage is the diagnostic that matters most:
+
+```text
+T1 → violation → repair
+T2 → violation → repair
+T3 → violation → repair
+T4 → violation → repair
+```
+
+Hearth distinguishes:
+
+- **Temporary execution error** — same finding, rare, doesn't recur after repair.
+- **Persistent harness-level control deficiency** — same finding, repeatedly, across
+  runs and releases.
+
+`persistent_drift` and `recurrence_count` are first-class metrics. A harness with a
+persistent finding isn't unlucky — it is *shaped* that way, and the benchmark says so
+with numbers.
+
+### Drift correction, not merely drift detection
+
+A new harness release regresses:
+
+```text
+Baseline                          Release N
+tool-call compliance: 97%    →    89%
+verification:         94%    →    91%
+state consistency:    98%    →    93%
+```
+
+Hearth detects the regression. With enforcement enabled, the same machinery corrects it
+inline:
+
+```text
+Release N → violation → Hearth → REPAIR → REPLAY → verify → continue
+```
+
+Detect, attribute, correct, measure, track recurrence — **one engine, five outputs.**
+
+---
+
+## 20. The supervisor — the control plane
+
+The supervisor is not just "the outermost loop." It is the **human/system control
+plane** above the entire kernel:
+
+```text
+                    SUPERVISOR
+                 /      |       \
+                /       |        \
+           mobile      web      API
+              \         |        /
+               \        |       /
+                └── SUPERVISION ──┘
+                        │
+                        ▼
+                    HEARTH CORE
+                        │
+              ┌─────────┼─────────┐
+              ▼         ▼         ▼
+           Codex     Browser    Custom
+           Claude    ChatGPT    Harness
+```
+
+### What the supervisor decides
+
+When Hearth produces a non-CONTINUE verdict that policy routes upward, the supervisor:
+
+- **Resolves `HALT`** — resume, repair, or abandon.
+- **Approves or rejects `tool.gate`** — irreversible actions can require explicit
+  supervisor confirmation.
+- **Force-backtracks** any loop below it.
+- **Raises R** on anything below it — between ticks.
+- **Amends contracts** — as versioned changes, which automatically trigger full-chain
+  replay ([§14](#14-contracts)).
+- **Answers clarification requests** — when a loop's finding is ambiguous, the tick can
+  surface a question, not just a verdict.
+
+### Who the supervisor is
+
+The supervisor does not have to be human:
+
+| Type | Behavior |
+|---|---|
+| **Human supervisor** | person, via mobile / web / API |
+| **AI supervisor** | a model with its own control loop — itself supervisable |
+| **Hybrid** | AI proposes, human confirms above a policy threshold |
+| **Policy supervisor** | deterministic rules; no intelligence, only policy |
+
+Each type is itself a benchmarkable configuration: the same run under human vs AI vs
+policy supervision produces comparable supervision-demand profiles.
+
+### The trust model — stated explicitly
+
+> **The supervisor is the ultimate policy authority.** Loops enforce contracts; the
+> supervisor *owns* them. It can override any verdict's disposition, raise or lower R,
+> amend contracts, and approve irreversible actions. Everything it does is itself a
+> tick — traced, measured, and attributed like everything else. Supervision authority is
+> delegated downward; it is never assumed by the kernel.
+
+And supervision is **measurable**:
+
+### Supervision demand is a capability dimension
+
+Two agents, same task:
+
+```text
+Agent A                          Agent B
+completion: 94%                  completion: 91%
+supervisor interventions: 17     supervisor interventions: 2
+backtracks: 11                   backtracks: 3
+repairs: 22                      repairs: 6
+```
+
+Depending on the deployment, **B may be the better autonomous system** — it needed far
+less external control to be nearly as correct. The question Hearth makes answerable:
+
+> **How much external control does this system require to remain correct?**
+
+That is a legitimate capability dimension, and it was previously unmeasured.
+
+---
+
+## 21. The kernel contract — frozen
+
+Everything in this document deploys or composes the following. This is the part every
+feature must prove itself against, and it is frozen:
+
+```text
+Tick → Loop resolution → Step → Verdict aggregation → Checkpoint/repair → Trace → Release
+```
+
+The actual shape:
+
+```text
+                 CONTRACTS
+                     │
+                     ▼
+HOST ──► TICK ──► RESOLVE ──► LOOPS ──► VERDICT
+                     │                    │
+                     │                    ▼
+                     │              REPAIR / BACKTRACK
+                     │                    │
+                     ▼                    ▼
+                  TRACE ◄──────────── CHECKPOINTS
+                     │
+                     ▼
+                 METRICS / AITD
+```
+
+The frozen statements:
+
+1. **The pipeline is fixed.** One event → one pipeline run → one tick record. Loops add
+   checks; nothing adds ticks.
+2. **The verdict protocol is closed.** `CONTINUE / REPAIR / BACKTRACK(d) / HALT` —
+   worst verdict wins, `dmax` on competing backtracks, nothing else escapes the core.
+3. **The capability boundary is declared.** Hearth defines what must be observable, what
+   may be intercepted, what may be gated, and what verdicts mean; the adapter declares
+   what the host actually provides; the declaration ships with every trace.
+4. **The trace is the substrate.** Every tick is recorded into the canonical traversal
+   graph; every metric is derived from it; nothing is measured outside it.
+5. **Release authority is the only variable.** Observe, audit (shadow/active), enforce
+   (auto/supervised) — same path, different authority. Benchmarking and meta-harnessing
+   are one mechanism.
+
+Everything else — native mode, meta mode, host mode, modality loops, tool loops, scenario
+loops, bundles, adapters, registries, the browser extension, the supervisor surfaces,
+drift reporting — is **how you deploy and compose this kernel**.
+
+---
+
+## 22. Quick start
 
 *(illustrative API — shape is stable, names may move)*
 
@@ -829,6 +1540,22 @@ h.attach_bundle("vision-swe", to="my-agent-harness")
 result = h.run(host=MyAgentHarness())   # your harness runs; Hearth enforces
 ```
 
+### Benchmark a public agent — shadow
+
+```python
+from hearth import Hearth, Adapter
+
+h = Hearth(mode="meta", compliance="audit", audit_enforcement="shadow")
+h.attach_adapter(Adapter.for_host("browser:chatgpt"))
+
+result = h.run(workload="swe-bench-lite", seed=7)
+print(result.control_profile)
+# native_violation_rate, correction_rate, control_delta, supervisor_interventions, ...
+```
+
+The same run with `compliance="enforce"` gives the enforced profile — and the
+difference is the Hearth Delta.
+
 ### Flash in a control loop
 
 ```python
@@ -854,12 +1581,13 @@ hearth.register(VisionLoop)
 ```bash
 hearth trace   --run R001 --format canonical-graph
 hearth metrics --run R001 --metric aitd
+hearth drift   --harness codex --baseline v1.0 --compare v1.4
 hearth replay  --run R001 --depth 3          # reconstruct state at any traversal depth
 ```
 
 ---
 
-## 19. Design invariants
+## 23. Design invariants
 
 1. **No artifact is trusted without a loop over it.**
 2. **Every loop is a module.** One contract, no exceptions.
@@ -874,12 +1602,22 @@ hearth replay  --run R001 --depth 3          # reconstruct state at any traversa
    exhaustion surfaces as `HALT` to the supervisor — never a quiet fade.
 10. **Hearth reads ticks; it never rewrites them.**
 11. **The pipeline is fixed; loops add checks, never ticks.** Addition is monotonic.
-12. **Worst verdict wins.** Many reviewers, one gate — disagreement degrades toward
-    caution, never toward optimism.
+12. **Worst verdict wins — and on competing `BACKTRACK` depths, `dmax` wins.** Many
+    reviewers, one gate; disagreement degrades toward caution, never toward optimism.
+    Dissenting findings are recorded, not discarded.
+13. **Measurement and enforcement are the same control path with different release
+    authority.** One engine; the deployment chooses the authority.
+14. **Hearth never assumes how a host executes.** The adapter declares what the host
+    actually provides — and the declaration is part of every trace and every benchmark
+    configuration.
+15. **No unbound contract is structurally representable.** Binding is enforced by the
+    data model at write time, not by convention.
+16. **Supervision demand is a first-class measurement.** How much external control a
+    system requires to remain correct is a capability dimension, reported per run.
 
 ---
 
-## 20. Limitations
+## 24. Limitations
 
 Stated plainly, because a harness that demands honesty from its hosts should show some:
 
@@ -888,20 +1626,28 @@ Stated plainly, because a harness that demands honesty from its hosts should sho
 - **Adaptive-R rules are policy.** The dynamic-R table is a sensible default, not a law
   of nature. It must be tuned per domain, and bad policy produces bad backtracks.
 - **Replay costs tokens and latency.** Overhead is measured
-  ([§16](#16-overhead-accounting)), not hidden. Cheap-tier checks are cheap; deep replays
+  ([§17](#17-overhead-accounting)), not hidden. Cheap-tier checks are cheap; deep replays
   are not.
-- **ENFORCE requires a pause-capable host.** Hosts that cannot pause degrade to AUDIT
-  (shadow) or OBSERVE — enforcement quality drops with the ladder. That is a documented
-  degradation path, not a free pass.
+- **ENFORCE requires gate + resume capabilities.** Hosts without them degrade along the
+  control path — to AUDIT (shadow/active) or OBSERVE. That is a documented degradation
+  path, not a free pass, and the degradation itself is recorded in the trace.
+- **Browser adapters are bounded by the environment.** What a web client can observe,
+  intercept, or gate is limited by what the platform permits; capability declarations
+  will honestly contain `partial` and `false`, and cross-host comparisons must respect
+  them.
 - **Supervisor quality bounds enforcement quality.** The outermost loop acts on
-  findings; garbage findings produce garbage backtracks.
-- **Design-stage numbers are illustrative.** The R-sweep table shows the axis, not
-  earned results. The values are claims to be earned by the benchmark suite
-  ([§17](#17-benchmark-harness-power--traversal-power)), not facts yet.
+  findings; garbage findings produce garbage backtracks. An AI supervisor is itself a
+  system under test — treat it as one.
+- **Shadow findings are not prevention.** Shadow audit detects and records; it does not
+  stop the violation from having happened. Irreversible damage in shadow mode is real
+  damage — that is precisely the information shadow mode exists to capture.
+- **Design-stage numbers are illustrative.** The R-sweep and Hearth-Delta tables show
+  the axis, not earned results. The values are claims to be earned by the benchmark
+  suite ([§18](#18-benchmark-harness-power--traversal-power)), not facts yet.
 
 ---
 
-## 21. Prior art
+## 25. Prior art
 
 The full surveyed landscape — including hedged, verify-before-citing names — lives in
 [`docs/PRIOR_ART.md`](docs/PRIOR_ART.md). The solidly citable pieces:
@@ -913,37 +1659,56 @@ The full surveyed landscape — including hedged, verify-before-citing names —
 - **Checkpoint + replay engineering** — save points, revalidate from them.
 
 What did not appear as one named object: enforcement-over-artifacts as the *identity*
-of a harness, no-unbound-contracts by construction, dynamic R as both first-class
-control and benchmark axis, dual wrap/be-wrapped under one module contract and four
-verdicts, a flash vest of stackable loops with explicit precedence, and AITD plus the
-canonical traversal graph as free measurement of harness power. The pieces existed.
-The binding did not.
+of a harness, no-unbound-contracts by construction (structural, in the data model),
+dynamic R as both first-class control and benchmark axis, dual wrap/be-wrapped under one
+module contract and four verdicts, a flash vest of stackable loops with explicit
+precedence, **the Hearth Delta as a benchmark of external-control contribution**,
+supervision demand as a capability dimension, and AITD plus the canonical traversal
+graph as free measurement of harness power. The pieces existed. The binding did not.
 
 ---
 
-## 22. Roadmap
+## 26. Roadmap
 
 - [ ] Reference adapters — files, shell, browser
 - [ ] 3D adapters — Blender first (canonical graph is already software-agnostic)
+- [ ] Browser extension adapter — ChatGPT / Claude / Z.ai / Grok clients
+- [ ] Adapter capability validator — posture derivation + registration-time validation
 - [ ] AITD reporter CLI + trace viewer (p50/p95 distributions per level)
+- [ ] Control profile reporter — violation rates, control delta, supervision demand
 - [ ] R-sweep benchmark suite — harness × model × replay depth
+- [ ] Shadow/enforced paired benchmark runner — automatic Hearth Delta computation
+- [ ] Drift time-series store — per-release baselines, attribution, recurrence tracking
 - [ ] Flash-loop registry — community loops, scoped and composable
 - [ ] Bundle registry — portable enforcement profiles across harnesses
 - [ ] Compliance-ladder adapters — AUDIT shadow runners for pause-less hosts
 - [ ] Checkpoint store backends — snapshot refs + compensating-action descriptors
+- [ ] Supervisor web app — findings inbox, clarification requests, contract amendments
+- [ ] Supervisor mobile app — approvals, HALT resolution, escalation notifications
+- [ ] Supervisor API — AI / hybrid / policy supervisor integrations
 - [ ] Supervisory scheduler presets — periodic overview agent as outermost loop
 
 ---
 
-## 23. FAQ
+## 27. FAQ
 
 **Is this another agent framework?**
-No. It is the control layer frameworks lack. Run it native, or wrap yours — it works
-either way, which is the point.
+No. It is an enforcement kernel — the control layer frameworks lack. Run it native, or
+wrap yours — it works either way, which is the point.
+
+**Is it a benchmark or a harness?**
+Yes. Measurement and enforcement are the same control path with different release
+authority. Shadow = benchmark. Gating = meta-harness. Escalation = supervision. One
+engine; the deployment chooses the authority.
 
 **Does it replace my harness?**
 No. It can wear your harness or be worn by it. Both directions are first-class
 integrations. It does not compete for "who is the agent."
+
+**Why not just build this into one agent?**
+Because then you could only measure that agent. External means you can measure *the
+harness* — across Codex, Claude Code, ChatGPT, custom hosts — under identical contracts,
+ticks, verdicts, and metrics. Comparability is the reason for the architecture.
 
 **Why isn't the checklist the feature?**
 Because a checklist is storage. The loop over it is the power. The checklist ships —
@@ -957,20 +1722,52 @@ and adding one never changes the cadence.
 **What is a tick?**
 The atomic unit. Every prompt, tool call, or state change the host emits is one tick,
 and one tick runs the fixed six-step pipeline: intercept, resolve, step, aggregate,
-emit, release. Iteration = tick. Metric = tick. Trace = tick.
+emit, release. One event → one pipeline run → one tick record. A host "turn" may span
+many ticks; Hearth counts ticks, never host turns.
 
 **What if my harness can't pause?**
-Declare `compliance: audit`. The identical pipeline runs in shadow — every violation
-recorded, reported to the supervisor, enforced from the outermost loop. No host is
-worth zero enforcement.
+Declare its real capabilities. It gets AUDIT — shadow or active — the identical pipeline
+in shadow, every violation recorded, reported to the supervisor, enforced from the
+outermost loop where possible. No host is worth zero enforcement.
+
+**What's the difference between shadow and active audit?**
+Shadow records findings and lets the host continue. Active audit records findings *and*
+files actionable ones the supervisor or outer loop can act on between ticks. Shadow
+asks "what went wrong?" Active asks "what should be done about it?"
+
+**What is the Hearth Delta?**
+The measured difference between a harness's shadow (unassisted) success and its enforced
+(controlled) success — reported alongside correction rate. It answers: *how much of this
+harness's apparent capability is external control?*
 
 **Who executes a repair?**
 The loop that owns the failing artifact. Hearth schedules it and re-verifies with the
 same R window that caught the finding.
 
 **What happens when two loops disagree on the same tick?**
-Worst verdict wins: `HALT > BACKTRACK(d) > REPAIR > CONTINUE`. Many reviewers, one
-gate. Disagreement degrades toward caution, never toward optimism.
+Worst verdict wins; on competing `BACKTRACK` depths, the maximum required depth wins
+(`dmax`). Dissenting findings are recorded in the trace. Disagreement degrades toward
+caution, never toward optimism.
+
+**What is drift, and is it a separate system?**
+Drift is the change in a harness's control behavior over releases — and it is not a
+separate system. Detection, attribution, correction, measurement, and recurrence
+tracking all reuse the existing tick → finding → verdict → repair → trace machinery.
+
+**What's the difference between a temporary error and persistent drift?**
+Recurrence. The same finding, repaired and returning across runs or releases, is
+persistent drift — a structural control deficiency, not bad luck. `persistent_drift` and
+`recurrence_count` are first-class metrics.
+
+**Who is the supervisor — human or AI?**
+Whatever the deployment makes it: human (mobile/web/API), AI (a supervised control loop
+itself), hybrid (AI proposes, human confirms), or pure policy. Each is a benchmarkable
+configuration, and supervision demand is measured for each.
+
+**Can I use the browser extension with ChatGPT/Claude/Grok?**
+That is the plan: the browser client is a first-class adapter — an observation and (where
+the platform permits) interception boundary — speaking the same canonical protocol. The
+benchmark is harness-independent; each public agent is one adapter.
 
 **Why the name?**
 A hearth is the heart of a structure — everything else gets built around it.
@@ -978,21 +1775,25 @@ Enforcement-over-state is the organ other harnesses are missing.
 
 **What does it measure?**
 Whatever it enforces. Ticks per level, replay depth used, blast radius, active sets,
-traversal coverage, its own overhead. The instrument and the enforcer are the same
-object.
+traversal coverage, its own overhead — plus violation rates, control delta, supervision
+demand, and drift. The instrument and the enforcer are the same object.
 
 ---
 
-## 24. Glossary
+## 28. Glossary
 
 | Term | Definition |
 |---|---|
 | **Control-Loop Harness** | master rolling-horizon loop + registry of sub loops; makes stored state enforceable |
+| **Enforcement kernel** | the frozen core: binds obligations to loops, evaluates at host-event boundaries, gates through four verdicts, records the canonical trace |
 | **Tick** | the atomic unit — one host event run through the fixed six-step pipeline; an iteration is one tick |
+| **Event identity / iteration identity** | every event is exactly one tick; a host turn may span many ticks — metrics count ticks, never host turns |
 | **Flash loop** | swappable control-loop module, flashed into the vest at runtime |
 | **The vest** | the loop registry — a kit, not a strap; a routing table of scope keys |
 | **Bundle** | a named, portable set of control loops, attachable to any registered harness unchanged |
 | **Scope key** | the address of a loop's jurisdiction — `harness:`, `modality:`, `tool:`, `scenario:` |
+| **Serialization level** | a loop's nesting depth in the registry, declared at registration — fixed for the run; what AITD indexes |
+| **Traversal depth** | path length in the canonical traversal graph, including revisits — distinct from serialization level |
 | **Replay depth (R)** | how many prior checkpoints each step re-verifies; dynamic |
 | **Forward horizon (H)** | how far ahead each step plans |
 | **AITD** | Agentic Iterative Traversal Depth — ticks per serialization level, reported as p50/p95 distributions |
@@ -1000,16 +1801,27 @@ object.
 | **Correction depth** | how far backward a correction propagated |
 | **Checkpoint** | id + trace position + contract versions in force + state snapshot ref (or compensating-action descriptor) |
 | **Verdict** | `CONTINUE` / `REPAIR` / `BACKTRACK(d)` / `HALT` |
-| **Worst verdict wins** | per-tick aggregation rule — `HALT > BACKTRACK(d) > REPAIR > CONTINUE` |
-| **Compliance level** | declared host capability — ENFORCE (pause) / AUDIT (shadow) / OBSERVE (trace) |
+| **Worst verdict wins** | per-tick aggregation — `HALT > BACKTRACK(dmax) > REPAIR > CONTINUE`; competing depths resolve to the maximum; dissents recorded |
+| **Backtrack phases** | rewind state / repair consequences / replay decisions — declared separately in the repair plan |
+| **Release authority** | what the deployment lets Hearth do with a verdict: trace it (observe), file it (audit), gate it (enforce), escalate it (supervise) |
+| **Control path** | OBSERVE · AUDIT(SHADOW \| ACTIVE) · ENFORCE(AUTO \| SUPERVISED) — one pipeline, five postures |
+| **Shadow audit** | evaluate without affecting execution — the raw-capability benchmark instrument |
+| **Active audit** | evaluate, record, and file actionable findings for the supervisor / outer loop |
+| **Hearth Delta** | enforced success − shadow success; the measured contribution of external control (reported in pp, distinct from correction rate) |
+| **Correction rate** | proportion of behavior Hearth corrected — distinct from control delta |
+| **Control profile** | the behavioral fingerprint: violation rates, repair/backtrack/escalation rates, persistent drift, recovery, overhead |
+| **Adapter capability** | declared host power: observe / intercept / gate / resume / inject / snapshot / compensate / supervise — `true`/`partial`/`false`, shipped with every trace |
 | **Non-rewrite guarantee** | Hearth gates the release of ticks; it never edits them — diffable, therefore testable |
-| **Canonical traversal graph** | software-agnostic record of every traversal event |
+| **Canonical traversal graph** | software-agnostic record of every traversal event; the substrate for checkpoints, replay, drift, benchmarks, and supervision |
 | **Adapter** | maps a native harness/environment onto the canonical schema |
-| **Contract** | a stored obligation bound to a loop — never stored unbound, always versioned |
-| **Supervisor** | the outermost loop — the only time-based loop; raises R, forces backtracks, audits progress |
+| **Contract** | a stored obligation bound to a loop — structurally incapable of being stored unbound; always versioned |
+| **Drift** | change in control behavior over releases — detect, attribute, correct, measure, track recurrence |
+| **Persistent drift** | a finding that recurs after repair across runs/releases — a structural deficiency, not an error |
+| **Supervision demand** | how much external control a system requires to remain correct — a first-class capability dimension |
+| **Supervisor** | the control plane above the kernel — human, AI, hybrid, or policy; ultimate policy authority; every supervisor action is itself a traced tick |
 
 ---
 
-## 25. License
+## 29. License
 
 MIT
