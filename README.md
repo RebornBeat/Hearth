@@ -1,6 +1,3 @@
-Here it is — the full README, complete, nothing omitted.
-
-````markdown
 <div align="center">
 
 # Hearth
@@ -684,11 +681,3 @@ sets, traversal coverage. The instrument and the enforcer are the same object.
 ## 20. License
 
 MIT
-````
-
-Two notes, both quick:
-
-1. **Name.** I used *Hearth* (heart + the thing everything is built around) as the working name — swap it anywhere without touching a single concept. The identity is the contract, not the label.
-2. **No omission check.** Everything from the thread is in: native/meta/host, the vest, flash loops, modality-first, master + sub loops, multi-modal contracts, harness registration in both directions, uniqueness-per-harness adapters, the artifact-is-not-a-control principle, dynamic R table, verdicts, precedence rules, canonical graph with all 13 fields, structural-vs-traversal parent, AITD, the R-sweep benchmark, and the supervisor as outermost loop.
-
-Want me to split this into README + CONTRIBUTING + spec pages next, or tighten any single section first?
